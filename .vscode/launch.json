@@ -1,0 +1,22 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Launch App",
+            "request": "launch",
+            "mainClass": "com.gp.stockapp.MainActivity",
+            "projectName": "app",
+            "androidManifestPath": "${workspaceFolder}/app/src/main/AndroidManifest.xml"
+        },
+        {
+            "type": "java",
+            "name": "Debug App",
+            "request": "launch",
+            "mainClass": "com.gp.stockapp.MainActivity",
+            "projectName": "app",
+            "androidManifestPath": "${workspaceFolder}/app/src/main/AndroidManifest.xml",
+            "noDebug": false
+        }
+    ]
+}
