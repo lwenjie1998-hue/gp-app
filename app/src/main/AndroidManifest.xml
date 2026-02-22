@@ -32,6 +32,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".NewsActivity"
+            android:label="市场要闻"
+            android:parentActivityName=".MainActivity" />
+
+        <activity android:name=".RecommendationActivity"
+            android:label="推荐详情"
+            android:parentActivityName=".MainActivity" />
+
+        <activity android:name=".NewsDetailActivity" />
         
         <!-- 股票数据抓取服务 -->
         <service

@@ -19,10 +19,15 @@ import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.model.MarketAnalysis;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
+import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.utils.PromptLoader;
 
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ExecutorService;
@@ -37,13 +42,25 @@ public class AIRecommendationService extends Service {
     private static final String CHANNEL_ID = "AIAnalysisChannel";
     private static final int NOTIFICATION_ID = 2;
     private static final long ANALYSIS_INTERVAL = 300000; // 5分钟分析一次
+    private static final long STRATEGY_INTERVAL = 600000; // 10分钟策略分析一次
+    
+    // 手动刷新动作
+    public static final String ACTION_FORCE_AUCTION = "com.gp.stockapp.FORCE_AUCTION";
+    public static final String ACTION_FORCE_CLOSING = "com.gp.stockapp.FORCE_CLOSING";
+    public static final String ACTION_FORCE_SECTOR = "com.gp.stockapp.FORCE_SECTOR";
 
     private StockRepository stockRepository;
     private GLM4Client glm4Client;
     private PromptLoader promptLoader;
     private ExecutorService executorService;
     private Timer analysisTimer;
+    private Timer strategyTimer;
     private boolean isRunning = false;
+    
+    // 策略执行标志位 - 确保每天只自动执行一次
+    private boolean auctionExecutedToday = false;
+    private boolean closingExecutedToday = false;
+    private String lastExecutionDate = "";
 
     @Override
     public void onCreate() {
@@ -67,6 +84,19 @@ public class AIRecommendationService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, createNotification());
         }
+        
+        // 处理手动刷新动作
+        if (intent != null && intent.getAction() != null) {
+            String action = intent.getAction();
+            if (ACTION_FORCE_AUCTION.equals(action)) {
+                forceAnalyzeAuctionStrategy();
+            } else if (ACTION_FORCE_CLOSING.equals(action)) {
+                forceAnalyzeClosingStrategy();
+            } else if (ACTION_FORCE_SECTOR.equals(action)) {
+                forceAnalyzeSectorStrategy();
+            }
+        }
+        
         startAnalysis();
         return START_STICKY;
     }
@@ -123,6 +153,7 @@ public class AIRecommendationService extends Service {
 
         isRunning = true;
         analysisTimer = new Timer();
+        strategyTimer = new Timer();
 
         // 延迟10秒后首次分析（等待数据就绪）
         analysisTimer.scheduleAtFixedRate(new TimerTask() {
@@ -132,7 +163,15 @@ public class AIRecommendationService extends Service {
             }
         }, 10000, ANALYSIS_INTERVAL);
 
-        Log.d(TAG, "Analysis started, interval: " + ANALYSIS_INTERVAL + "ms");
+        // 延迟20秒后首次策略分析
+        strategyTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override
+            public void run() {
+                analyzeStrategies();
+            }
+        }, 20000, STRATEGY_INTERVAL);
+
+        Log.d(TAG, "Analysis started, interval: " + ANALYSIS_INTERVAL + "ms, strategy: " + STRATEGY_INTERVAL + "ms");
     }
 
     private void stopAnalysis() {
@@ -140,6 +179,10 @@ public class AIRecommendationService extends Service {
         if (analysisTimer != null) {
             analysisTimer.cancel();
             analysisTimer = null;
+        }
+        if (strategyTimer != null) {
+            strategyTimer.cancel();
+            strategyTimer = null;
         }
         Log.d(TAG, "Analysis stopped");
     }
@@ -162,7 +205,7 @@ public class AIRecommendationService extends Service {
                 }
 
                 // 加载提示词模板
-                String promptTemplate = promptLoader.loadPrompt("market_analysis.txt");
+                String promptTemplate = promptLoader.loadMarketAnalysisPrompt();
                 if (promptTemplate == null || promptTemplate.isEmpty()) {
                     promptTemplate = getDefaultPrompt();
                 }
@@ -320,5 +363,373 @@ public class AIRecommendationService extends Service {
     private void sendBroadcast(String action) {
         Intent intent = new Intent(action);
         LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    }
+
+    // ===== 策略推荐分析 =====
+
+    /**
+     * 根据时间段分析适当的策略推荐
+     */
+    private void analyzeStrategies() {
+        Log.d(TAG, "Analyzing strategies...");
+
+        executorService.execute(() -> {
+            try {
+                List<MarketIndex> indices = stockRepository.getMarketIndices();
+                List<StockNews> newsList = stockRepository.getLatestNews(10);
+
+                if (indices == null || indices.isEmpty()) {
+                    Log.d(TAG, "No market data for strategy analysis");
+                    return;
+                }
+
+                Calendar cal = Calendar.getInstance();
+                int hour = cal.get(Calendar.HOUR_OF_DAY);
+                int minute = cal.get(Calendar.MINUTE);
+                
+                // 检查日期，如果是新的一天，重置执行标志
+                String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
+                if (!today.equals(lastExecutionDate)) {
+                    lastExecutionDate = today;
+                    auctionExecutedToday = false;
+                    closingExecutedToday = false;
+                    Log.d(TAG, "New trading day, reset execution flags");
+                }
+
+                // 板块推荐 - 全天候分析
+                analyzeSectorStrategy(indices, newsList);
+
+                // 开盘竞价推荐 - 只在9:25之后执行，且每天只自动执行一次
+                if ((hour == 9 && minute >= 25) || (hour >= 10)) {
+                    if (!auctionExecutedToday) {
+                        analyzeAuctionStrategy(indices, newsList);
+                        auctionExecutedToday = true;
+                        Log.d(TAG, "Auction strategy executed for today");
+                    }
+                }
+
+                // 尾盘推荐 - 只在14:50之后执行，且每天只自动执行一次
+                if ((hour == 14 && minute >= 50) || hour >= 15) {
+                    if (!closingExecutedToday) {
+                        analyzeClosingStrategy(indices, newsList);
+                        closingExecutedToday = true;
+                        Log.d(TAG, "Closing strategy executed for today");
+                    }
+                }
+
+            } catch (Exception e) {
+                Log.e(TAG, "Error analyzing strategies", e);
+            }
+        });
+    }
+
+    /**
+     * 板块推荐分析
+     */
+    private void analyzeSectorStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
+        try {
+            String marketData = buildMarketDataText(indices, newsList);
+            String prompt = getSectorPrompt() + "\n\n" + marketData;
+
+            String response = glm4Client.analyze(prompt);
+            if (response != null && !response.isEmpty()) {
+                StrategyRecommendation recommendation = parseStrategyRecommendation(response, "sector");
+                if (recommendation != null) {
+                    recommendation.setTimestamp(System.currentTimeMillis());
+                    recommendation.setType("sector");
+                    stockRepository.saveSectorRecommendation(recommendation);
+                    sendBroadcast(MainActivity.ACTION_STRATEGY_UPDATED);
+                    Log.d(TAG, "Sector strategy analysis completed");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in sector analysis", e);
+        }
+    }
+
+    /**
+     * 开盘竞价推荐分析（游资策略）
+     */
+    private void analyzeAuctionStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
+        try {
+            String marketData = buildMarketDataText(indices, newsList);
+            String prompt = getAuctionPrompt() + "\n\n" + marketData;
+
+            String response = glm4Client.analyze(prompt);
+            if (response != null && !response.isEmpty()) {
+                StrategyRecommendation recommendation = parseStrategyRecommendation(response, "open_auction");
+                if (recommendation != null) {
+                    recommendation.setTimestamp(System.currentTimeMillis());
+                    recommendation.setType("open_auction");
+                    stockRepository.saveAuctionRecommendation(recommendation);
+                    sendBroadcast(MainActivity.ACTION_STRATEGY_UPDATED);
+                    Log.d(TAG, "Auction strategy analysis completed");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in auction analysis", e);
+        }
+    }
+
+    /**
+     * 尾盘推荐分析
+     */
+    private void analyzeClosingStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
+        try {
+            String marketData = buildMarketDataText(indices, newsList);
+            String prompt = getClosingPrompt() + "\n\n" + marketData;
+
+            String response = glm4Client.analyze(prompt);
+            if (response != null && !response.isEmpty()) {
+                StrategyRecommendation recommendation = parseStrategyRecommendation(response, "closing");
+                if (recommendation != null) {
+                    recommendation.setTimestamp(System.currentTimeMillis());
+                    recommendation.setType("closing");
+                    stockRepository.saveClosingRecommendation(recommendation);
+                    sendBroadcast(MainActivity.ACTION_STRATEGY_UPDATED);
+                    Log.d(TAG, "Closing strategy analysis completed");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in closing analysis", e);
+        }
+    }
+    
+    // ===== 手动刷新方法（供外部调用）=====
+    
+    /**
+     * 手动刷新竞价推荐（忽略时间和执行标志限制）
+     */
+    public void forceAnalyzeAuctionStrategy() {
+        Log.d(TAG, "Force analyzing auction strategy...");
+        executorService.execute(() -> {
+            try {
+                List<MarketIndex> indices = stockRepository.getMarketIndices();
+                List<StockNews> newsList = stockRepository.getLatestNews(10);
+                if (indices != null && !indices.isEmpty()) {
+                    analyzeAuctionStrategy(indices, newsList);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error in force auction analysis", e);
+            }
+        });
+    }
+    
+    /**
+     * 手动刷新尾盘推荐（忽略时间和执行标志限制）
+     */
+    public void forceAnalyzeClosingStrategy() {
+        Log.d(TAG, "Force analyzing closing strategy...");
+        executorService.execute(() -> {
+            try {
+                List<MarketIndex> indices = stockRepository.getMarketIndices();
+                List<StockNews> newsList = stockRepository.getLatestNews(10);
+                if (indices != null && !indices.isEmpty()) {
+                    analyzeClosingStrategy(indices, newsList);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error in force closing analysis", e);
+            }
+        });
+    }
+    
+    /**
+     * 手动刷新板块推荐
+     */
+    public void forceAnalyzeSectorStrategy() {
+        Log.d(TAG, "Force analyzing sector strategy...");
+        executorService.execute(() -> {
+            try {
+                List<MarketIndex> indices = stockRepository.getMarketIndices();
+                List<StockNews> newsList = stockRepository.getLatestNews(10);
+                if (indices != null && !indices.isEmpty()) {
+                    analyzeSectorStrategy(indices, newsList);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error in force sector analysis", e);
+            }
+        });
+    }
+
+    /**
+     * 构建市场数据文本
+     */
+    private String buildMarketDataText(List<MarketIndex> indices, List<StockNews> newsList) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 当前大盘数据\n\n");
+        for (MarketIndex index : indices) {
+            sb.append("### ").append(index.getIndexName()).append("\n");
+            sb.append("当前点位：").append(String.format("%.2f", index.getCurrentPoint())).append("\n");
+            sb.append("涨跌幅：").append(index.getFormattedChangePercent()).append("\n");
+            sb.append("成交额：").append(index.getFormattedAmount());
+            String volumeChange = index.getVolumeChangeText();
+            if (!volumeChange.isEmpty()) {
+                sb.append(" (").append(volumeChange).append(")");
+            }
+            sb.append("\n\n");
+        }
+        if (newsList != null && !newsList.isEmpty()) {
+            sb.append("## 市场新闻\n\n");
+            for (StockNews news : newsList) {
+                if (news.getTitle() != null) {
+                    sb.append("- ").append(news.getTitle()).append("\n");
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 解析策略推荐结果
+     */
+    private StrategyRecommendation parseStrategyRecommendation(String response, String type) {
+        try {
+            com.google.gson.Gson gson = new com.google.gson.Gson();
+            StrategyRecommendation rec = gson.fromJson(response, StrategyRecommendation.class);
+            if (rec != null) return rec;
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing strategy recommendation JSON", e);
+        }
+
+        // JSON解析失败时，创建文本结果
+        StrategyRecommendation rec = new StrategyRecommendation();
+        rec.setType(type);
+        rec.setAnalysisText(response);
+        rec.setConfidence(50);
+        rec.setRiskLevel("medium");
+        switch (type) {
+            case "sector":
+                rec.setTitle("板块推荐");
+                rec.setSummary("AI分析解析中，请参考原始分析文本。");
+                break;
+            case "open_auction":
+                rec.setTitle("开盘竞价推荐");
+                rec.setSummary("AI分析解析中，请参考原始分析文本。");
+                break;
+            case "closing":
+                rec.setTitle("尾盘推荐");
+                rec.setSummary("AI分析解析中，请参考原始分析文本。");
+                break;
+        }
+        return rec;
+    }
+
+    // ===== 策略 Prompt =====
+
+    /**
+     * 板块推荐 Prompt
+     */
+    private String getSectorPrompt() {
+        String prompt = promptLoader.loadSectorStrategyPrompt();
+        if (prompt != null && !prompt.isEmpty()) return prompt;
+
+        return "你是一位资深A股板块分析师。\n" +
+                "请根据以下大盘数据和市场新闻，分析当前最值得关注的行业板块。\n\n" +
+                "请输出JSON格式，包含以下字段：\n" +
+                "{\n" +
+                "  \"title\": \"板块推荐\",\n" +
+                "  \"summary\": \"整体板块分析概述(50字内)\",\n" +
+                "  \"confidence\": 0-100,\n" +
+                "  \"risk_level\": \"low/medium/high\",\n" +
+                "  \"items\": [\n" +
+                "    {\n" +
+                "      \"name\": \"板块名称\",\n" +
+                "      \"reason\": \"推荐理由(30字内)\",\n" +
+                "      \"highlight\": \"亮点标签(如:政策利好/资金涌入/业绩超预期)\",\n" +
+                "      \"score\": 0-100,\n" +
+                "      \"related_stocks\": [\"龙头股1\", \"龙头股2\", \"龙头股3\", \"龙头股4\", \"龙头股5\"],\n" +
+                "      \"tags\": [\"标签1\", \"标签2\"]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"strategy_note\": \"操作建议\",\n" +
+                "  \"analysis_text\": \"详细分析文本\"\n" +
+                "}\n\n" +
+                "请推荐3-5个板块，按推荐度从高到低排列。每个板块请给出4-5只相关龙头股。\n" +
+                "**重要：只推荐A股股票（沪深交易所上市），不要推荐港股、美股或其他市场的股票**";
+    }
+
+    /**
+     * 开盘竞价推荐 Prompt（游资策略）
+     */
+    private String getAuctionPrompt() {
+        String prompt = promptLoader.loadAuctionStrategyPrompt();
+        if (prompt != null && !prompt.isEmpty()) return prompt;
+
+        return "你是一名实战经验超过15年的顶级A股游资操盘手，精通集合竞价阶段的短线狙击战法。\n" +
+                "你深谙龙虎榜资金博弈、题材轮动节奏、市场情绪周期。\n\n" +
+                "游资竞价核心战法：\n" +
+                "- 龙头优先：只做板块最强辨识度个股\n" +
+                "- 量价验证：竞价量能必须超过昨日均量30%\n" +
+                "- 情绪共振：大盘情绪至少在\"复苏\"以上阶段\n" +
+                "- 资金合力：竞价期间大单持续扫货\n" +
+                "- 严格止损：开盘15分钟跌破均价线即止损\n\n" +
+                "请输出JSON格式，包含以下字段：\n" +
+                "{\n" +
+                "  \"title\": \"开盘竞价推荐\",\n" +
+                "  \"summary\": \"今日竞价策略概述(50字内，含市场情绪和主攻方向)\",\n" +
+                "  \"confidence\": 0-100,\n" +
+                "  \"risk_level\": \"high\",\n" +
+                "  \"items\": [\n" +
+                "    {\n" +
+                "      \"name\": \"标的名称\",\n" +
+                "      \"reason\": \"游资视角推荐理由(30字内)\",\n" +
+                "      \"highlight\": \"核心逻辑(如:主线龙头弱转强/题材首板打板/连板缩量加速)\",\n" +
+                "      \"score\": 0-100,\n" +
+                "      \"entry_timing\": \"9:20-9:25竞价挂单策略\",\n" +
+                "      \"stop_loss\": \"止损位置\",\n" +
+                "      \"target_price\": \"目标位\",\n" +
+                "      \"tags\": [\"打板\", \"龙头\", \"弱转强\"]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"market_sentiment\": \"市场情绪周期(冰点/修复/高潮/分化/退潮)\",\n" +
+                "  \"main_line\": \"当前最强主线题材\",\n" +
+                "  \"strategy_note\": \"仓位管理与游资风控纪律提醒\",\n" +
+                "  \"analysis_text\": \"详细分析文本\"\n" +
+                "}\n\n" +
+                "请推荐5-8个标的，注意风险控制提示。此策略风险较高，请务必提醒仓位管理。\n" +
+                "**重要：只推荐A股股票（沪深交易所上市），不要推荐港股、美股或其他市场的股票**";
+    }
+
+    /**
+     * 尾盘推荐 Prompt（游资策略）
+     */
+    private String getClosingPrompt() {
+        String prompt = promptLoader.loadClosingStrategyPrompt();
+        if (prompt != null && !prompt.isEmpty()) return prompt;
+
+        return "你是一名实战经验超过15年的顶级A股游资操盘手，精通尾盘低吸战法和隔夜套利博弈。\n" +
+                "你深谙全天资金博弈规律，能从尾盘异动中捕捉次日高开机会。\n\n" +
+                "游资尾盘核心战法：\n" +
+                "- 趋势为王：只做上升趋势中的回调低吸\n" +
+                "- 龙头优先：尾盘买入必须是板块辨识度最高的龙头\n" +
+                "- 量价验证：尾盘放量拉升必须伴随大单净流入\n" +
+                "- 买在分歧，卖在一致；低吸强势，不抄烂股\n\n" +
+                "请输出JSON格式，包含以下字段：\n" +
+                "{\n" +
+                "  \"title\": \"尾盘推荐\",\n" +
+                "  \"summary\": \"尾盘策略概述(50字内，含全天市场总结和主攻方向)\",\n" +
+                "  \"confidence\": 0-100,\n" +
+                "  \"risk_level\": \"low/medium/high\",\n" +
+                "  \"items\": [\n" +
+                "    {\n" +
+                "      \"name\": \"标的名称\",\n" +
+                "      \"reason\": \"游资视角推荐理由(30字内)\",\n" +
+                "      \"highlight\": \"核心逻辑(如:龙头尾盘低吸/炸板回封/弱转强确认)\",\n" +
+                "      \"score\": 0-100,\n" +
+                "      \"entry_timing\": \"买入时间和价格策略\",\n" +
+                "      \"target_price\": \"次日目标位\",\n" +
+                "      \"stop_loss\": \"止损位\",\n" +
+                "      \"next_day_plan\": \"次日操作预案(高开/低开怎么做)\",\n" +
+                "      \"tags\": [\"隔夜\", \"低吸\", \"弱转强\"]\n" +
+                "    }\n" +
+                "  ],\n" +
+                "  \"market_sentiment\": \"全天市场情绪总结(冰点/修复/高潮/分化/退潮)\",\n" +
+                "  \"main_line\": \"今日最强主线题材\",\n" +
+                "  \"overnight_risk\": \"隔夜风险评估(外盘、消息面等)\",\n" +
+                "  \"strategy_note\": \"游资尾盘风控纪律提醒\",\n" +
+                "  \"analysis_text\": \"详细分析文本\"\n" +
+                "}\n\n" +
+                "请推荐5-8个标的，注重次日开盘预期分析。\n" +
+                "**重要：只推荐A股股票（沪深交易所上市），不要推荐港股、美股或其他市场的股票**";
     }
 }

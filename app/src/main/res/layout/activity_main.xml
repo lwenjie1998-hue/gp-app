@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F5F5">
+    android:background="#F0F2F5">
 
     <!-- 顶部工具栏 -->
     <com.google.android.material.appbar.AppBarLayout
@@ -39,7 +39,7 @@
                 android:background="@drawable/bg_gradient"
                 android:orientation="vertical"
                 android:paddingHorizontal="16dp"
-                android:paddingBottom="24dp">
+                android:paddingBottom="16dp">
 
                 <!-- 上证指数（主卡片） -->
                 <LinearLayout
@@ -48,8 +48,8 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/card_transparent"
                     android:orientation="vertical"
-                    android:padding="16dp"
-                    android:layout_marginBottom="12dp">
+                    android:padding="12dp"
+                    android:layout_marginBottom="8dp">
 
                     <TextView
                         android:id="@+id/tv_sh_name"
@@ -140,7 +140,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/card_transparent"
                         android:orientation="vertical"
-                        android:padding="12dp"
+                        android:padding="10dp"
                         android:layout_marginEnd="6dp">
 
                         <TextView
@@ -203,7 +203,7 @@
                         android:layout_weight="1"
                         android:background="@drawable/card_transparent"
                         android:orientation="vertical"
-                        android:padding="12dp"
+                        android:padding="10dp"
                         android:layout_marginStart="6dp">
 
                         <TextView
@@ -270,55 +270,32 @@
                 android:paddingTop="16dp"
                 android:paddingBottom="24dp">
 
-                <!-- 服务控制区 -->
+                <!-- 服务控制 + 状态栏（一行） -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:layout_marginBottom="16dp">
 
                     <Button
                         android:id="@+id/btn_start_service"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
                         android:text="开始监控"
                         android:textColor="@color/white"
-                        android:textSize="15sp"
+                        android:textSize="14sp"
                         android:background="@drawable/btn_primary"
-                        android:layout_marginEnd="8dp"
+                        android:paddingHorizontal="24dp"
+                        android:layout_marginEnd="12dp"
                         android:stateListAnimator="@null" />
-
-                    <Button
-                        android:id="@+id/btn_stop_service"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
-                        android:text="停止监控"
-                        android:textColor="#666666"
-                        android:textSize="15sp"
-                        android:background="@drawable/btn_outline"
-                        android:layout_marginStart="8dp"
-                        android:stateListAnimator="@null" />
-                </LinearLayout>
-
-                <!-- 状态栏 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/card_background"
-                    android:elevation="2dp"
-                    android:orientation="horizontal"
-                    android:padding="12dp"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="16dp">
 
                     <View
                         android:id="@+id/status_indicator"
                         android:layout_width="8dp"
                         android:layout_height="8dp"
                         android:background="#9E9E9E"
-                        android:layout_marginEnd="8dp" />
+                        android:layout_marginEnd="6dp" />
 
                     <TextView
                         android:id="@+id/tv_status"
@@ -342,10 +319,10 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/card_background"
-                    android:elevation="2dp"
+                    android:background="@drawable/card_elevated"
+                    android:elevation="4dp"
                     android:orientation="vertical"
-                    android:padding="16dp"
+                    android:padding="20dp"
                     android:layout_marginBottom="16dp">
 
                     <LinearLayout
@@ -517,33 +494,314 @@
                         android:layout_marginTop="8dp" />
                 </LinearLayout>
 
-                <!-- 市场新闻卡片 -->
+                <!-- ===== 策略推荐 2x2 网格 ===== -->
+
+                <!-- 第一行：市场要闻 + 板块推荐 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/card_background"
-                    android:elevation="2dp"
-                    android:orientation="vertical"
-                    android:padding="16dp">
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="10dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <!-- 市场要闻 -->
+                    <LinearLayout
+                        android:id="@+id/card_news"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="📰 市场要闻"
-                        android:textColor="#1A237E"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:layout_marginBottom="12dp" />
+                        android:layout_weight="1"
+                        android:background="@drawable/card_news_bg"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:layout_marginEnd="5dp"
+                        android:minHeight="160dp">
 
-                    <TextView
-                        android:id="@+id/tv_news_list"
-                        android:layout_width="match_parent"
+                        <!-- 标题行 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="10dp">
+
+                            <TextView
+                                android:layout_width="26dp"
+                                android:layout_height="26dp"
+                                android:background="@drawable/circle_icon_bg_light"
+                                android:text="📰"
+                                android:textSize="13sp"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="市场要闻"
+                                android:textColor="@color/white"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:layout_marginStart="6dp" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <TextView
+                                android:id="@+id/tv_news_more"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="查看全部 ▶"
+                                android:textColor="#80FFFFFF"
+                                android:textSize="10sp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <!-- 新闻列表容器 -->
+                        <LinearLayout
+                            android:id="@+id/layout_news_items"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+
+                        <!-- 无数据时的占位 -->
+                        <TextView
+                            android:id="@+id/tv_news_list"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="暂无新闻数据"
+                            android:textColor="#B0FFFFFF"
+                            android:textSize="11sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- 板块推荐 -->
+                    <LinearLayout
+                        android:id="@+id/card_sector"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="暂无新闻数据"
-                        android:textColor="#555555"
-                        android:textSize="13sp"
-                        android:lineSpacingMultiplier="1.6" />
+                        android:layout_weight="1"
+                        android:background="@drawable/card_sector_bg"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:layout_marginStart="5dp"
+                        android:minHeight="160dp">
+
+                        <!-- 标题行 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="10dp">
+
+                            <TextView
+                                android:layout_width="26dp"
+                                android:layout_height="26dp"
+                                android:background="@drawable/circle_icon_bg"
+                                android:text="🔥"
+                                android:textSize="13sp"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="板块推荐"
+                                android:textColor="@color/white"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:layout_marginStart="6dp" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <TextView
+                                android:id="@+id/tv_sector_more"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="查看全部 ▶"
+                                android:textColor="#80FFFFFF"
+                                android:textSize="10sp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <!-- 推荐列表容器 -->
+                        <LinearLayout
+                            android:id="@+id/layout_sector_items"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+
+                        <!-- 无数据时的占位 -->
+                        <TextView
+                            android:id="@+id/tv_sector_list"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="等待AI分析..."
+                            android:textColor="#B0FFFFFF"
+                            android:textSize="11sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
                 </LinearLayout>
+
+                <!-- 第二行：竞价推荐 + 尾盘推荐 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="12dp">
+
+                    <!-- 开盘竞价推荐 -->
+                    <LinearLayout
+                        android:id="@+id/card_auction"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_auction_bg"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:layout_marginEnd="5dp"
+                        android:minHeight="160dp">
+
+                        <!-- 标题行 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="10dp">
+
+                            <TextView
+                                android:layout_width="26dp"
+                                android:layout_height="26dp"
+                                android:background="@drawable/circle_icon_bg"
+                                android:text="⚡"
+                                android:textSize="13sp"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="竞价推荐"
+                                android:textColor="@color/white"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:layout_marginStart="6dp" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <TextView
+                                android:id="@+id/tv_auction_more"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="查看全部 ▶"
+                                android:textColor="#80FFFFFF"
+                                android:textSize="10sp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <!-- 推荐列表容器 -->
+                        <LinearLayout
+                            android:id="@+id/layout_auction_items"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+
+                        <!-- 无数据时的占位 -->
+                        <TextView
+                            android:id="@+id/tv_auction_list"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="等待AI分析..."
+                            android:textColor="#B0FFFFFF"
+                            android:textSize="11sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- 尾盘推荐 -->
+                    <LinearLayout
+                        android:id="@+id/card_closing"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="@drawable/card_closing_bg"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:layout_marginStart="5dp"
+                        android:minHeight="160dp">
+
+                        <!-- 标题行 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="10dp">
+
+                            <TextView
+                                android:layout_width="26dp"
+                                android:layout_height="26dp"
+                                android:background="@drawable/circle_icon_bg"
+                                android:text="🌙"
+                                android:textSize="13sp"
+                                android:gravity="center" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="尾盘推荐"
+                                android:textColor="@color/white"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:layout_marginStart="6dp" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <TextView
+                                android:id="@+id/tv_closing_more"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="查看全部 ▶"
+                                android:textColor="#80FFFFFF"
+                                android:textSize="10sp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+
+                        <!-- 推荐列表容器 -->
+                        <LinearLayout
+                            android:id="@+id/layout_closing_items"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+
+                        <!-- 无数据时的占位 -->
+                        <TextView
+                            android:id="@+id/tv_closing_list"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="等待AI分析..."
+                            android:textColor="#B0FFFFFF"
+                            android:textSize="11sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 底部免责声明 -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⚠ 免责声明：以上推荐均由AI生成，仅供参考，不构成投资建议。投资有风险，入市需谨慎。"
+                    android:textColor="#999999"
+                    android:textSize="11sp"
+                    android:lineSpacingMultiplier="1.4"
+                    android:gravity="center"
+                    android:paddingVertical="16dp" />
 
             </LinearLayout>
 

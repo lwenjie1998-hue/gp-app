@@ -5,6 +5,10 @@ import android.util.Log;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.reflect.TypeToken;
 
 import java.io.IOException;
@@ -30,8 +34,14 @@ public class MarketApi {
 
     // 新浪财经实时行情API
     private static final String SINA_API = "https://hq.sinajs.cn/list=";
-    // 市场新闻API（可配置）
-    private static final String NEWS_API = "https://api.example.com/market/news";
+
+    // ===== 新闻源 =====
+    // 新浪财经滚动新闻（股市要闻）
+    private static final String SINA_NEWS_API = "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&k=&num=%d&page=1&r=0.1&callback=";
+    // 东方财富财经快讯
+    private static final String EASTMONEY_NEWS_API = "https://np-listapi.eastmoney.com/comm/web/getFastNewsList?client=web&biz=web_home_channel&fastColumn=102&sortEnd=&pageSize=%d&req_trace=";
+    // 新浪财经全球要闻
+    private static final String SINA_GLOBAL_NEWS_API = "https://feed.mix.sina.com.cn/api/roll/get?pageid=155&lid=2520&k=&num=%d&page=1&r=0.1&callback=";
 
     // 三大指数代码
     private static final String[] INDEX_CODES = {
@@ -69,11 +79,13 @@ public class MarketApi {
      */
     public List<MarketIndex> fetchMarketIndices() {
         List<MarketIndex> indices = new ArrayList<>();
+        Log.d(TAG, "正在抓取三大指数实时数据...");
 
         try {
             // 构建请求URL：同时请求三大指数
             String codes = String.join(",", INDEX_CODES);
             String url = SINA_API + codes;
+            Log.d(TAG, "指数请求URL: " + url);
 
             Request request = new Request.Builder()
                     .url(url)
@@ -85,11 +97,13 @@ public class MarketApi {
             if (response.isSuccessful() && response.body() != null) {
                 String responseBody = response.body().string();
                 indices = parseSinaResponse(responseBody);
-                Log.d(TAG, "Fetched " + indices.size() + " market indices");
+                Log.d(TAG, "成功抓取到 " + indices.size() + " 个指数数据");
+            } else {
+                Log.w(TAG, "指数抓取请求失败，状态码: " + (response != null ? response.code() : "unknown"));
             }
 
         } catch (IOException e) {
-            Log.e(TAG, "Error fetching market indices", e);
+            Log.e(TAG, "抓取大盘指数时发生IO错误", e);
         }
 
         return indices;
@@ -174,7 +188,7 @@ public class MarketApi {
     }
 
     /**
-     * 抓取市场新闻
+     * 抓取市场新闻（综合国内外新闻源）
      */
     public List<StockNews> fetchMarketNews() {
         return fetchMarketNews(10);
@@ -182,31 +196,463 @@ public class MarketApi {
 
     /**
      * 抓取指定数量的市场新闻
+     * 从多个来源获取，合并去重后返回
      */
     public List<StockNews> fetchMarketNews(int limit) {
+        List<StockNews> allNews = new ArrayList<>();
+
+        // 1. 从新浪财经抓取国内股市要闻
         try {
-            String url = NEWS_API + "?limit=" + limit;
-
-            Request request = new Request.Builder()
-                    .url(url)
-                    .get()
-                    .build();
-
-            Response response = client.newCall(request).execute();
-
-            if (response.isSuccessful() && response.body() != null) {
-                String responseBody = response.body().string();
-                Type listType = new TypeToken<List<StockNews>>() {}.getType();
-                List<StockNews> newsList = gson.fromJson(responseBody, listType);
-                Log.d(TAG, "Fetched " + (newsList != null ? newsList.size() : 0) + " news");
-                return newsList != null ? newsList : new ArrayList<>();
-            }
-
-        } catch (IOException e) {
-            Log.e(TAG, "Error fetching market news", e);
+            List<StockNews> sinaNews = fetchSinaNews(limit);
+            allNews.addAll(sinaNews);
+            Log.d(TAG, "Fetched " + sinaNews.size() + " news from Sina Finance");
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching Sina news", e);
         }
 
-        return new ArrayList<>();
+        // 2. 从新浪抓取全球财经要闻
+        try {
+            List<StockNews> globalNews = fetchSinaGlobalNews(limit / 2);
+            allNews.addAll(globalNews);
+            Log.d(TAG, "Fetched " + globalNews.size() + " global news from Sina");
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching Sina global news", e);
+        }
+
+        // 3. 从东方财富抓取快讯
+        try {
+            List<StockNews> eastmoneyNews = fetchEastMoneyNews(limit);
+            allNews.addAll(eastmoneyNews);
+            Log.d(TAG, "Fetched " + eastmoneyNews.size() + " news from EastMoney");
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching EastMoney news", e);
+        }
+
+        // 去重（按标题）并按时间降序排序
+        List<StockNews> uniqueNews = deduplicateNews(allNews);
+        uniqueNews.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
+
+        // 限制返回数量
+        if (uniqueNews.size() > limit) {
+            uniqueNews = uniqueNews.subList(0, limit);
+        }
+
+        Log.d(TAG, "Total unique news: " + uniqueNews.size());
+        return uniqueNews;
+    }
+
+    /**
+     * 从新浪财经滚动新闻API抓取国内股市要闻
+     *
+     * 接口返回JSON格式：
+     * {"result":{"status":{"code":0},"data":{"feed":{"entry":[
+     *   {"id":"...","title":"...","summary":"...","published_date":"...","source":"..."},
+     *   ...
+     * ]}}}}
+     */
+    private List<StockNews> fetchSinaNews(int limit) throws IOException {
+        List<StockNews> newsList = new ArrayList<>();
+        String url = String.format(SINA_NEWS_API, Math.min(limit, 20));
+        Log.d(TAG, "正在从新浪抓取国内新闻: " + url);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://finance.sina.com.cn")
+                .get()
+                .build();
+
+        Response response = client.newCall(request).execute();
+        if (!response.isSuccessful() || response.body() == null) {
+            Log.w(TAG, "新浪国内新闻请求失败，状态码: " + (response != null ? response.code() : "unknown"));
+            return newsList;
+        }
+
+        String body = response.body().string();
+        Log.d(TAG, "新浪国内新闻返回长度: " + body.length());
+        if (body.length() > 0) {
+            Log.v(TAG, "新浪响应内容(前200): " + (body.length() > 200 ? body.substring(0, 200) : body));
+        }
+
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonElement resultElem = root.get("result");
+            
+            if (resultElem == null || resultElem.isJsonNull()) {
+                Log.w(TAG, "新浪国内新闻返回数据中没有 result 字段");
+                return newsList;
+            }
+
+            JsonObject data = null;
+            JsonArray entries = null;
+            if (resultElem.isJsonObject()) {
+                JsonElement dataElem = resultElem.getAsJsonObject().get("data");
+                if (dataElem != null && dataElem.isJsonObject()) {
+                    data = dataElem.getAsJsonObject();
+                } else if (dataElem != null && dataElem.isJsonArray()) {
+                    // data 直接就是数组
+                    entries = dataElem.getAsJsonArray();
+                }
+            } else {
+                Log.w(TAG, "新浪国内新闻 result 字段不是对象，而是: " + resultElem.getClass().getSimpleName());
+                return newsList;
+            }
+
+            if (data == null && entries == null) {
+                Log.w(TAG, "新浪国内新闻返回数据中 data 字段为空或不是对象");
+                return newsList;
+            }
+
+            // 兼容不同返回格式
+            if (entries == null && data != null) {
+                if (data.has("feed")) {
+                    JsonObject feed = data.getAsJsonObject("feed");
+                    if (feed != null && feed.has("entry")) {
+                        entries = feed.getAsJsonArray("entry");
+                    }
+                } else if (data.has("entry")) {
+                    entries = data.getAsJsonArray("entry");
+                }
+            }
+
+            if (entries == null) {
+                Log.w(TAG, "无法在新浪响应中找到新闻列表(entries)");
+                return newsList;
+            }
+
+            for (JsonElement element : entries) {
+                try {
+                    JsonObject entry = element.getAsJsonObject();
+                    StockNews news = new StockNews();
+                    news.setNewsId("sina_" + getJsonString(entry, "id"));
+                    news.setTitle(cleanHtmlTags(getJsonString(entry, "title")));
+                    news.setSummary(cleanHtmlTags(getJsonString(entry, "summary")));
+                    news.setSource(getJsonString(entry, "source", "新浪财经"));
+                    news.setNewsType("国内财经");
+
+                    // 解析时间
+                    String dateStr = getJsonString(entry, "published_date");
+                    if (!dateStr.isEmpty()) {
+                        news.setPublishTime(parseSinaDate(dateStr));
+                    } else {
+                        // 尝试用 ctime 字段
+                        String ctime = getJsonString(entry, "ctime");
+                        if (!ctime.isEmpty()) {
+                            news.setPublishTime(parseSinaDate(ctime));
+                        } else {
+                            news.setPublishTime(System.currentTimeMillis());
+                        }
+                    }
+
+                    if (news.getTitle() != null && !news.getTitle().isEmpty()) {
+                        newsList.add(news);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "解析单条新浪国内新闻出错", e);
+                }
+            }
+            Log.d(TAG, "成功从新浪抓取国内新闻: " + newsList.size() + " 条");
+        } catch (Exception e) {
+            Log.e(TAG, "解析新浪国内新闻响应数据时出错", e);
+        }
+
+        return newsList;
+    }
+
+    /**
+     * 从新浪抓取全球财经要闻
+     */
+    private List<StockNews> fetchSinaGlobalNews(int limit) throws IOException {
+        List<StockNews> newsList = new ArrayList<>();
+        String url = String.format(SINA_GLOBAL_NEWS_API, Math.min(limit, 10));
+        Log.d(TAG, "正在从新浪抓取全球新闻: " + url);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://finance.sina.com.cn")
+                .get()
+                .build();
+
+        Response response = client.newCall(request).execute();
+        if (!response.isSuccessful() || response.body() == null) {
+            Log.w(TAG, "新浪全球新闻请求失败，状态码: " + (response != null ? response.code() : "unknown"));
+            return newsList;
+        }
+
+        String body = response.body().string();
+        Log.d(TAG, "新浪全球新闻返回长度: " + body.length());
+        if (body.length() > 0) {
+            Log.v(TAG, "新浪全球响应内容(前200): " + (body.length() > 200 ? body.substring(0, 200) : body));
+        }
+
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonElement resultElem = root.get("result");
+            
+            if (resultElem == null || resultElem.isJsonNull()) {
+                Log.w(TAG, "新浪全球新闻返回数据中没有 result 字段");
+                return newsList;
+            }
+
+            JsonObject data = null;
+            JsonArray entries = null;
+            if (resultElem.isJsonObject()) {
+                JsonElement dataElem = resultElem.getAsJsonObject().get("data");
+                if (dataElem != null && dataElem.isJsonObject()) {
+                    data = dataElem.getAsJsonObject();
+                } else if (dataElem != null && dataElem.isJsonArray()) {
+                    // data 直接就是数组
+                    entries = dataElem.getAsJsonArray();
+                }
+            } else {
+                Log.w(TAG, "新浪全球新闻 result 字段不是对象，而是: " + resultElem.getClass().getSimpleName());
+                return newsList;
+            }
+
+            if (data == null && entries == null) {
+                Log.w(TAG, "新浪全球新闻 data 字段为空或不是对象");
+                return newsList;
+            }
+
+            if (entries == null && data != null) {
+                if (data.has("feed")) {
+                    JsonObject feed = data.getAsJsonObject("feed");
+                    if (feed != null && feed.has("entry")) {
+                        entries = feed.getAsJsonArray("entry");
+                    }
+                } else if (data.has("entry")) {
+                    entries = data.getAsJsonArray("entry");
+                }
+            }
+
+            if (entries == null) {
+                Log.w(TAG, "无法在新浪全球响应中找到新闻列表(entries)");
+                return newsList;
+            }
+
+            for (JsonElement element : entries) {
+                try {
+                    JsonObject entry = element.getAsJsonObject();
+                    StockNews news = new StockNews();
+                    news.setNewsId("sina_global_" + getJsonString(entry, "id"));
+                    news.setTitle(cleanHtmlTags(getJsonString(entry, "title")));
+                    news.setSummary(cleanHtmlTags(getJsonString(entry, "summary")));
+                    news.setSource(getJsonString(entry, "source", "新浪财经"));
+                    news.setNewsType("全球财经");
+
+                    String dateStr = getJsonString(entry, "published_date");
+                    if (!dateStr.isEmpty()) {
+                        news.setPublishTime(parseSinaDate(dateStr));
+                    } else {
+                        String ctime = getJsonString(entry, "ctime");
+                        news.setPublishTime(!ctime.isEmpty() ? parseSinaDate(ctime) : System.currentTimeMillis());
+                    }
+
+                    if (news.getTitle() != null && !news.getTitle().isEmpty()) {
+                        newsList.add(news);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "解析单条新浪全球新闻出错", e);
+                }
+            }
+            Log.d(TAG, "成功从新浪抓取全球新闻: " + newsList.size() + " 条");
+        } catch (Exception e) {
+            Log.e(TAG, "解析新浪全球新闻响应数据时出错", e);
+        }
+
+        return newsList;
+    }
+
+    /**
+     * 从东方财富抓取财经快讯
+     *
+     * 接口返回JSON格式：
+     * {"data":{"fastNewsList":[
+     *   {"digestType":"1","digest":[{"title":"xxx","content":"xxx","showTime":"xxx"}]},
+     *   ...
+     * ]}}
+     */
+    private List<StockNews> fetchEastMoneyNews(int limit) throws IOException {
+        List<StockNews> newsList = new ArrayList<>();
+        String url = String.format(EASTMONEY_NEWS_API, Math.min(limit, 20));
+        Log.d(TAG, "正在从东方财富抓取快讯: " + url);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://www.eastmoney.com")
+                .get()
+                .build();
+
+        Response response = client.newCall(request).execute();
+        if (!response.isSuccessful() || response.body() == null) {
+            Log.w(TAG, "东方财富快讯请求失败，状态码: " + (response != null ? response.code() : "unknown"));
+            return newsList;
+        }
+
+        String body = response.body().string();
+        Log.d(TAG, "东方财富快讯返回长度: " + body.length());
+        if (body.length() > 0) {
+            Log.v(TAG, "东方财富快讯响应内容(前200): " + (body.length() > 200 ? body.substring(0, 200) : body));
+        }
+
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonElement dataElem = root.get("data");
+            if (dataElem == null || !dataElem.isJsonObject()) {
+                Log.w(TAG, "东方财富快讯返回数据格式不正确: data 字段有误");
+                return newsList;
+            }
+
+            JsonObject data = dataElem.getAsJsonObject();
+            JsonArray fastNewsList = data.has("fastNewsList") ? data.getAsJsonArray("fastNewsList") : null;
+            if (fastNewsList == null) {
+                Log.w(TAG, "东方财富快讯列表为空 (fastNewsList == null)");
+                return newsList;
+            }
+
+            for (JsonElement element : fastNewsList) {
+                try {
+                    JsonObject item = element.getAsJsonObject();
+                    JsonArray digestArr = item.getAsJsonArray("digest");
+                    if (digestArr == null || digestArr.size() == 0) continue;
+
+                    JsonObject digest = digestArr.get(0).getAsJsonObject();
+
+                    StockNews news = new StockNews();
+                    news.setNewsId("em_" + getJsonString(item, "code"));
+
+                    String title = getJsonString(digest, "title");
+                    String content = getJsonString(digest, "content");
+
+                    // 东方财富有时 title 为空，content 包含完整内容
+                    if (title.isEmpty() && !content.isEmpty()) {
+                        // 截取前50字符作为标题
+                        title = content.length() > 50 ? content.substring(0, 50) + "..." : content;
+                    }
+                    news.setTitle(cleanHtmlTags(title));
+                    news.setSummary(cleanHtmlTags(content));
+                    news.setSource("东方财富");
+                    news.setNewsType("财经快讯");
+
+                    // 解析时间
+                    String showTime = getJsonString(digest, "showTime");
+                    if (!showTime.isEmpty()) {
+                        news.setPublishTime(parseEastMoneyDate(showTime));
+                    } else {
+                        news.setPublishTime(System.currentTimeMillis());
+                    }
+
+                    if (news.getTitle() != null && !news.getTitle().isEmpty()) {
+                        newsList.add(news);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "解析单条东方财富快讯出错", e);
+                }
+            }
+            Log.d(TAG, "成功从东方财富抓取快讯: " + newsList.size() + " 条");
+        } catch (Exception e) {
+            Log.e(TAG, "解析东方财富响应数据时出错", e);
+        }
+
+        return newsList;
+    }
+
+    /**
+     * 新闻去重（按标题相似度）
+     */
+    private List<StockNews> deduplicateNews(List<StockNews> newsList) {
+        List<StockNews> unique = new ArrayList<>();
+        for (StockNews news : newsList) {
+            if (news.getTitle() == null || news.getTitle().isEmpty()) continue;
+            boolean duplicate = false;
+            for (StockNews existing : unique) {
+                if (isSimilarTitle(news.getTitle(), existing.getTitle())) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) {
+                unique.add(news);
+            }
+        }
+        return unique;
+    }
+
+    /**
+     * 判断两个标题是否相似（简单判断：前20个字是否相同）
+     */
+    private boolean isSimilarTitle(String title1, String title2) {
+        if (title1.equals(title2)) return true;
+        String s1 = title1.length() > 20 ? title1.substring(0, 20) : title1;
+        String s2 = title2.length() > 20 ? title2.substring(0, 20) : title2;
+        return s1.equals(s2);
+    }
+
+    // ===== 工具方法 =====
+
+    /**
+     * 安全获取JSON字符串字段
+     */
+    private String getJsonString(JsonObject obj, String key) {
+        return getJsonString(obj, key, "");
+    }
+
+    private String getJsonString(JsonObject obj, String key, String defaultVal) {
+        if (obj.has(key) && !obj.get(key).isJsonNull()) {
+            return obj.get(key).getAsString().trim();
+        }
+        return defaultVal;
+    }
+
+    /**
+     * 清除HTML标签
+     */
+    private String cleanHtmlTags(String text) {
+        if (text == null) return "";
+        return text.replaceAll("<[^>]+>", "").replaceAll("&[a-zA-Z]+;", " ").trim();
+    }
+
+    /**
+     * 解析新浪日期格式
+     * 格式样例："2026-02-22 13:30:00"  或  "02月22日 13:30"
+     */
+    private long parseSinaDate(String dateStr) {
+        try {
+            // 尝试标准格式
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA);
+            return sdf.parse(dateStr).getTime();
+        } catch (Exception e1) {
+            try {
+                // 尝试短格式（只有月日时分）
+                java.text.SimpleDateFormat sdf2 = new java.text.SimpleDateFormat("MM月dd日 HH:mm", java.util.Locale.CHINA);
+                java.util.Calendar cal = java.util.Calendar.getInstance();
+                int year = cal.get(java.util.Calendar.YEAR);
+                java.util.Date d = sdf2.parse(dateStr);
+                if (d != null) {
+                    cal.setTime(d);
+                    cal.set(java.util.Calendar.YEAR, year);
+                    return cal.getTimeInMillis();
+                }
+            } catch (Exception e2) {
+                // ignore
+            }
+        }
+        return System.currentTimeMillis();
+    }
+
+    /**
+     * 解析东方财富日期格式
+     * 格式样例："2026-02-22 13:30:00"
+     */
+    private long parseEastMoneyDate(String dateStr) {
+        try {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA);
+            return sdf.parse(dateStr).getTime();
+        } catch (Exception e) {
+            return System.currentTimeMillis();
+        }
     }
 
     private double parseDouble(String value) {

@@ -146,9 +146,11 @@ public class StockDataService extends Service {
      * 抓取大盘数据
      */
     private void fetchMarketData() {
+        Log.d(TAG, "==== 开始执行定时数据抓取任务 ====");
         executorService.execute(() -> {
             try {
                 // 抓取三大指数数据
+                Log.d(TAG, "正在抓取大盘指数...");
                 List<MarketIndex> indices = marketApi.fetchMarketIndices();
                 if (indices != null && !indices.isEmpty()) {
                     stockRepository.saveMarketIndices(indices);
@@ -159,17 +161,24 @@ public class StockDataService extends Service {
                     // 通知UI刷新
                     sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
 
-                    Log.d(TAG, "Market indices updated: " + indices.size());
+                    Log.d(TAG, "成功更新大盘指数: " + indices.size() + " 条记录");
+                } else {
+                    Log.w(TAG, "抓取大盘指数失败或列表为空");
                 }
 
                 // 抓取市场新闻
+                Log.d(TAG, "正在抓取市场要闻...");
                 List<StockNews> newsList = marketApi.fetchMarketNews();
                 if (newsList != null && !newsList.isEmpty()) {
                     stockRepository.saveNewsData(newsList);
+                    Log.d(TAG, "成功更新市场要闻: 抓取并保存了 " + newsList.size() + " 条新闻");
+                } else {
+                    Log.w(TAG, "市场要闻抓取结果为空（可能所有源都失败了）");
                 }
 
+                Log.d(TAG, "==== 定时数据抓取任务完成 ====");
             } catch (Exception e) {
-                Log.e(TAG, "Error fetching market data", e);
+                Log.e(TAG, "定时抓取大盘数据时发生严重错误", e);
             }
         });
     }

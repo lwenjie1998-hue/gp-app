@@ -59,6 +59,34 @@ public class PromptLoader {
     }
     
     /**
+     * 加载大盘分析提示词
+     */
+    public String loadMarketAnalysisPrompt() {
+        return loadPrompt("market_analysis.txt");
+    }
+    
+    /**
+     * 加载板块推荐提示词
+     */
+    public String loadSectorStrategyPrompt() {
+        return loadPrompt("sector_strategy.txt");
+    }
+    
+    /**
+     * 加载开盘竞价推荐提示词（游资策略）
+     */
+    public String loadAuctionStrategyPrompt() {
+        return loadPrompt("auction_strategy.txt");
+    }
+    
+    /**
+     * 加载尾盘推荐提示词（游资策略）
+     */
+    public String loadClosingStrategyPrompt() {
+        return loadPrompt("closing_strategy.txt");
+    }
+    
+    /**
      * 加载量化分析提示词
      */
     public String loadQuantitativePrompt() {
@@ -73,7 +101,7 @@ public class PromptLoader {
     }
     
     /**
-     * 加载综合分析提示词
+     * 加载综合分析提示词（量化+游资融合）
      */
     public String loadCombinedPrompt() {
         return loadPrompt("combined_analysis.txt");

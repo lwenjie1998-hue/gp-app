@@ -7,12 +7,16 @@ import android.util.Log;
 import com.gp.stockapp.model.MarketAnalysis;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
+import com.gp.stockapp.model.StrategyRecommendation;
+import com.gp.stockapp.utils.TradingDayHelper;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -26,9 +30,14 @@ public class StockRepository {
 
     private static final String PREF_NAME = "market_data_prefs";
     private static final String KEY_INDICES = "market_indices";
+    private static final String KEY_PREV_DAY_AMOUNTS = "prev_day_amounts";
+    private static final String KEY_LAST_TRADING_DATE = "last_trading_date";
     private static final String KEY_NEWS = "market_news";
     private static final String KEY_ANALYSIS = "market_analysis";
     private static final String KEY_ANALYSIS_HISTORY = "analysis_history";
+    private static final String KEY_SECTOR_RECOMMENDATION = "sector_recommendation";
+    private static final String KEY_AUCTION_RECOMMENDATION = "auction_recommendation";
+    private static final String KEY_CLOSING_RECOMMENDATION = "closing_recommendation";
 
     private SharedPreferences preferences;
     private Gson gson;
@@ -51,27 +60,74 @@ public class StockRepository {
 
     /**
      * 保存大盘指数数据
+     * 自动处理前日成交额对比（用于放量/缩量判断）
+     * 
+     * 核心逻辑：
+     * 1. 判断当前数据属于哪个交易日（非交易日时API返回的是最后一个交易日的数据）
+     * 2. 如果是新的交易日，将旧交易日的成交额存为"前日成交额"
+     * 3. prevAmount 始终为上一个交易日的最终成交额
      */
     public void saveMarketIndices(List<MarketIndex> indices) {
         executorService.execute(() -> {
-            // 读取之前的数据，用于对比放量/缩量
-            List<MarketIndex> previousIndices = getMarketIndices();
+            String lastSavedTradingDay = preferences.getString(KEY_LAST_TRADING_DATE, "");
             
-            // 为新数据设置前日成交额
-            for (MarketIndex newIndex : indices) {
-                for (MarketIndex prevIndex : previousIndices) {
-                    if (newIndex.getIndexCode() != null && 
-                        newIndex.getIndexCode().equals(prevIndex.getIndexCode())) {
-                        newIndex.setPrevAmount(prevIndex.getAmount());
-                        break;
+            // 确定当前数据属于哪个交易日
+            // 非交易日（周末/节假日）API返回的数据仍然是最后一个交易日的
+            String currentTradingDay = TradingDayHelper.getLatestTradingDayStr();
+            
+            // 获取存储的前一交易日成交额
+            Map<String, Double> prevDayAmounts = getPrevDayAmounts();
+            
+            if (!currentTradingDay.equals(lastSavedTradingDay) && !lastSavedTradingDay.isEmpty()) {
+                // 交易日变化了 → 把上一个交易日的成交额存为"前日成交额"
+                List<MarketIndex> lastIndices = getMarketIndices();
+                for (MarketIndex lastIndex : lastIndices) {
+                    if (lastIndex.getIndexCode() != null && lastIndex.getAmount() > 0) {
+                        prevDayAmounts.put(lastIndex.getIndexCode(), lastIndex.getAmount());
                     }
+                }
+                savePrevDayAmounts(prevDayAmounts);
+                Log.d(TAG, "Trading day changed: " + lastSavedTradingDay + " -> " + currentTradingDay 
+                        + ", saved prev amounts: " + prevDayAmounts);
+            }
+            
+            // 为新数据设置前日成交额（用于放量/缩量显示）
+            for (MarketIndex newIndex : indices) {
+                if (newIndex.getIndexCode() != null && prevDayAmounts.containsKey(newIndex.getIndexCode())) {
+                    newIndex.setPrevAmount(prevDayAmounts.get(newIndex.getIndexCode()));
                 }
             }
             
+            // 保存当前数据和交易日标记
             String json = gson.toJson(indices);
-            preferences.edit().putString(KEY_INDICES, json).apply();
-            Log.d(TAG, "Saved " + indices.size() + " market indices");
+            preferences.edit()
+                    .putString(KEY_INDICES, json)
+                    .putString(KEY_LAST_TRADING_DATE, currentTradingDay)
+                    .apply();
+            Log.d(TAG, "Saved " + indices.size() + " market indices for trading day: " + currentTradingDay);
         });
+    }
+
+    /**
+     * 获取存储的前日各指数成交额
+     */
+    private Map<String, Double> getPrevDayAmounts() {
+        String json = preferences.getString(KEY_PREV_DAY_AMOUNTS, "{}");
+        try {
+            Type type = new TypeToken<Map<String, Double>>() {}.getType();
+            Map<String, Double> map = gson.fromJson(json, type);
+            return map != null ? map : new HashMap<>();
+        } catch (Exception e) {
+            return new HashMap<>();
+        }
+    }
+
+    /**
+     * 保存前日各指数成交额
+     */
+    private void savePrevDayAmounts(Map<String, Double> amounts) {
+        String json = gson.toJson(amounts);
+        preferences.edit().putString(KEY_PREV_DAY_AMOUNTS, json).apply();
     }
 
     /**
@@ -143,6 +199,83 @@ public class StockRepository {
         Type type = new TypeToken<List<MarketAnalysis>>() {}.getType();
         List<MarketAnalysis> list = gson.fromJson(json, type);
         return list != null ? new ArrayList<>(list) : new ArrayList<>();
+    }
+
+    // ===== 策略推荐管理 =====
+
+    /**
+     * 保存板块推荐
+     */
+    public void saveSectorRecommendation(StrategyRecommendation recommendation) {
+        executorService.execute(() -> {
+            String json = gson.toJson(recommendation);
+            preferences.edit().putString(KEY_SECTOR_RECOMMENDATION, json).apply();
+            Log.d(TAG, "Saved sector recommendation");
+        });
+    }
+
+    /**
+     * 获取板块推荐
+     */
+    public StrategyRecommendation getSectorRecommendation() {
+        String json = preferences.getString(KEY_SECTOR_RECOMMENDATION, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, StrategyRecommendation.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing sector recommendation", e);
+            return null;
+        }
+    }
+
+    /**
+     * 保存开盘竞价推荐（游资策略）
+     */
+    public void saveAuctionRecommendation(StrategyRecommendation recommendation) {
+        executorService.execute(() -> {
+            String json = gson.toJson(recommendation);
+            preferences.edit().putString(KEY_AUCTION_RECOMMENDATION, json).apply();
+            Log.d(TAG, "Saved auction recommendation");
+        });
+    }
+
+    /**
+     * 获取开盘竞价推荐
+     */
+    public StrategyRecommendation getAuctionRecommendation() {
+        String json = preferences.getString(KEY_AUCTION_RECOMMENDATION, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, StrategyRecommendation.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing auction recommendation", e);
+            return null;
+        }
+    }
+
+    /**
+     * 保存尾盘推荐
+     */
+    public void saveClosingRecommendation(StrategyRecommendation recommendation) {
+        executorService.execute(() -> {
+            String json = gson.toJson(recommendation);
+            preferences.edit().putString(KEY_CLOSING_RECOMMENDATION, json).apply();
+            Log.d(TAG, "Saved closing recommendation");
+        });
+    }
+
+    /**
+     * 获取尾盘推荐
+     */
+    public StrategyRecommendation getClosingRecommendation() {
+        String json = preferences.getString(KEY_CLOSING_RECOMMENDATION, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, StrategyRecommendation.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing closing recommendation", e);
+            return null;
+        }
     }
 
     // ===== 新闻数据管理 =====

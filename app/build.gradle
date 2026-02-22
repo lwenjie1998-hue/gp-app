@@ -46,6 +46,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     
     // 网络请求
     implementation 'com.squareup.retrofit2:retrofit:2.9.0'
@@ -64,6 +65,9 @@ dependencies {
     implementation 'androidx.room:room-runtime:2.6.1'
     implementation 'androidx.room:room-ktx:2.6.1'
     annotationProcessor 'androidx.room:room-compiler:2.6.1'
+    
+    // FlexboxLayout
+    implementation 'com.google.android.flexbox:flexbox:3.0.0'
     
     // 图表库
     implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'

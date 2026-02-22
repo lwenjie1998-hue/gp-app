@@ -6,17 +6,21 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,6 +36,7 @@ import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.model.MarketAnalysis;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
+import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.service.StockDataService;
 import com.gp.stockapp.service.AIRecommendationService;
@@ -60,12 +65,15 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvSentiment, tvTrend, tvRisk, tvSuggestion;
     private TextView tvAnalysisDetail, tvToggleDetail, tvAnalysisTime;
     // 新闻 UI
+    private LinearLayout cardNews;
     private TextView tvNewsList;
+    private TextView tvNewsMore;
+    private LinearLayout layoutNewsItems;
     // 状态 UI
     private TextView tvStatus, tvLastUpdate;
     private View statusIndicator;
     // 按钮
-    private Button btnStartService, btnStopService;
+    private Button btnStartService;
 
     private StockRepository stockRepository;
     private GLM4Client glm4Client;
@@ -76,6 +84,17 @@ public class MainActivity extends AppCompatActivity {
     // 数据更新广播
     public static final String ACTION_DATA_UPDATED = "com.gp.stockapp.DATA_UPDATED";
     public static final String ACTION_ANALYSIS_UPDATED = "com.gp.stockapp.ANALYSIS_UPDATED";
+    public static final String ACTION_STRATEGY_UPDATED = "com.gp.stockapp.STRATEGY_UPDATED";
+
+    // 策略推荐 UI
+    private TextView tvSectorMore, tvSectorList;
+    private LinearLayout layoutSectorItems;
+
+    private TextView tvAuctionMore, tvAuctionList;
+    private LinearLayout layoutAuctionItems;
+
+    private TextView tvClosingMore, tvClosingList;
+    private LinearLayout layoutClosingItems;
 
     private BroadcastReceiver dataReceiver = new BroadcastReceiver() {
         @Override
@@ -85,6 +104,8 @@ public class MainActivity extends AppCompatActivity {
                 refreshNews();
             } else if (ACTION_ANALYSIS_UPDATED.equals(intent.getAction())) {
                 refreshAnalysis();
+            } else if (ACTION_STRATEGY_UPDATED.equals(intent.getAction())) {
+                refreshStrategyRecommendations();
             }
         }
     };
@@ -154,7 +175,36 @@ public class MainActivity extends AppCompatActivity {
         tvAnalysisTime = findViewById(R.id.tv_analysis_time);
 
         // 新闻
+        cardNews = findViewById(R.id.card_news);
         tvNewsList = findViewById(R.id.tv_news_list);
+        tvNewsMore = findViewById(R.id.tv_news_more);
+        layoutNewsItems = findViewById(R.id.layout_news_items);
+        
+        // 点击整个新闻卡片或"查看更多"都跳转到新闻列表页
+        View.OnClickListener newsClickListener = v -> {
+            startActivity(new Intent(MainActivity.this, NewsActivity.class));
+        };
+        cardNews.setOnClickListener(newsClickListener);
+        tvNewsMore.setOnClickListener(newsClickListener);
+        layoutNewsItems.setOnClickListener(newsClickListener);
+
+        // 板块推荐
+        tvSectorMore = findViewById(R.id.tv_sector_more);
+        tvSectorList = findViewById(R.id.tv_sector_list);
+        layoutSectorItems = findViewById(R.id.layout_sector_items);
+        findViewById(R.id.card_sector).setOnClickListener(v -> openRecommendationDetail("sector"));
+
+        // 开盘竞价推荐
+        tvAuctionMore = findViewById(R.id.tv_auction_more);
+        tvAuctionList = findViewById(R.id.tv_auction_list);
+        layoutAuctionItems = findViewById(R.id.layout_auction_items);
+        findViewById(R.id.card_auction).setOnClickListener(v -> openRecommendationDetail("auction"));
+
+        // 尾盘推荐
+        tvClosingMore = findViewById(R.id.tv_closing_more);
+        tvClosingList = findViewById(R.id.tv_closing_list);
+        layoutClosingItems = findViewById(R.id.layout_closing_items);
+        findViewById(R.id.card_closing).setOnClickListener(v -> openRecommendationDetail("closing"));
 
         // 状态
         tvStatus = findViewById(R.id.tv_status);
@@ -163,10 +213,14 @@ public class MainActivity extends AppCompatActivity {
 
         // 按钮
         btnStartService = findViewById(R.id.btn_start_service);
-        btnStopService = findViewById(R.id.btn_stop_service);
 
-        btnStartService.setOnClickListener(this::onStartService);
-        btnStopService.setOnClickListener(this::onStopService);
+        btnStartService.setOnClickListener(v -> {
+            if (isServiceRunning) {
+                onStopService(v);
+            } else {
+                onStartService(v);
+            }
+        });
 
         // 详情展开/收起
         tvToggleDetail.setOnClickListener(v -> toggleAnalysisDetail());
@@ -187,6 +241,7 @@ public class MainActivity extends AppCompatActivity {
         refreshMarketData();
         refreshAnalysis();
         refreshNews();
+        refreshStrategyRecommendations();
     }
 
     // ===== 服务控制 =====
@@ -241,11 +296,17 @@ public class MainActivity extends AppCompatActivity {
             statusIndicator.setBackground(dot);
             tvStatus.setText("监控运行中");
             tvStatus.setTextColor(0xFF43A047);
+            btnStartService.setText("停止监控");
+            btnStartService.setBackgroundResource(R.drawable.btn_outline);
+            btnStartService.setTextColor(0xFF666666);
         } else {
             dot.setColor(0xFF9E9E9E); // 灰色
             statusIndicator.setBackground(dot);
             tvStatus.setText("服务未启动");
             tvStatus.setTextColor(0xFF666666);
+            btnStartService.setText("开始监控");
+            btnStartService.setBackgroundResource(R.drawable.btn_primary);
+            btnStartService.setTextColor(0xFFFFFFFF);
         }
     }
 
@@ -362,24 +423,288 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshNews() {
-        List<StockNews> newsList = stockRepository.getLatestNews(5);
+        List<StockNews> newsList = stockRepository.getLatestNews(20);
         if (newsList == null || newsList.isEmpty()) {
+            tvNewsList.setVisibility(View.VISIBLE);
             tvNewsList.setText("暂无新闻数据");
+            layoutNewsItems.setVisibility(View.GONE);
+            tvNewsMore.setVisibility(View.GONE);
             return;
         }
+
+        tvNewsList.setVisibility(View.GONE);
+        layoutNewsItems.setVisibility(View.VISIBLE);
+        layoutNewsItems.removeAllViews();
+
+        // 主界面只展示前3条标题，点击查看详情
+        int previewCount = Math.min(3, newsList.size());
+        
+        for (int i = 0; i < previewCount; i++) {
+            StockNews news = newsList.get(i);
+            if (news.getTitle() == null || news.getTitle().isEmpty()) continue;
+
+            // 新闻条目容器
+            LinearLayout itemLayout = new LinearLayout(this);
+            itemLayout.setOrientation(LinearLayout.VERTICAL);
+            int padV = dpToPx(6);
+            int padH = dpToPx(2);
+            itemLayout.setPadding(padH, padV, padH, padV);
+            
+            // 点击单条也可以跳转
+            itemLayout.setOnClickListener(v -> startActivity(new Intent(MainActivity.this, NewsActivity.class)));
+
+            // 标题 (只显示标题，去除时间和来源，界面更简洁)
+            TextView tvTitle = new TextView(this);
+            tvTitle.setText("• " + news.getTitle());
+            tvTitle.setTextColor(0xFFFFFFFF);
+            tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            tvTitle.setMaxLines(1);
+            tvTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            itemLayout.addView(tvTitle);
+
+            layoutNewsItems.addView(itemLayout);
+
+            // 分割线（最后一条不加）
+            if (i < previewCount - 1) {
+                View divider = new View(this);
+                divider.setBackgroundColor(0x15FFFFFF);
+                LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1));
+                divParams.topMargin = dpToPx(2);
+                divParams.bottomMargin = dpToPx(2);
+                divider.setLayoutParams(divParams);
+                layoutNewsItems.addView(divider);
+            }
+        }
+
+        // 总是显示查看更多，引导用户点击
+        tvNewsMore.setVisibility(View.VISIBLE);
+        tvNewsMore.setText("查看全部 ▶");
+    }
+
+    /**
+     * 格式化新闻列表为文本
+     */
+    private String formatNewsList(List<StockNews> newsList) {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.CHINA);
+        SimpleDateFormat sdfFull = new SimpleDateFormat("MM-dd HH:mm", Locale.CHINA);
+        long now = System.currentTimeMillis();
+        long todayStart = now - (now % 86400000);
 
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < newsList.size(); i++) {
             StockNews news = newsList.get(i);
-            if (news.getTitle() != null) {
-                sb.append("• ").append(news.getTitle());
-                if (i < newsList.size() - 1) {
-                    sb.append("\n\n");
+            if (news.getTitle() == null || news.getTitle().isEmpty()) continue;
+
+            sb.append("• ").append(news.getTitle());
+
+            StringBuilder meta = new StringBuilder();
+            if (news.getSource() != null && !news.getSource().isEmpty()) {
+                meta.append(news.getSource());
+            }
+            if (news.getPublishTime() > 0) {
+                if (meta.length() > 0) meta.append("  ");
+                if (news.getPublishTime() >= todayStart) {
+                    meta.append(sdf.format(new Date(news.getPublishTime())));
+                } else {
+                    meta.append(sdfFull.format(new Date(news.getPublishTime())));
                 }
             }
+            if (meta.length() > 0) {
+                sb.append("\n  ").append(meta);
+            }
+
+            if (i < newsList.size() - 1) {
+                sb.append("\n\n");
+            }
         }
-        tvNewsList.setText(sb.toString());
+        return sb.toString();
     }
+
+    /**
+     * 显示全部新闻的弹窗
+     */
+    private void showNewsDialog() {
+        List<StockNews> newsList = stockRepository.getLatestNews(20);
+        if (newsList == null || newsList.isEmpty()) {
+            Toast.makeText(this, "暂无新闻数据", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 创建滚动视图
+        android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+        scrollView.setPadding(32, 24, 32, 24);
+
+        TextView tvContent = new TextView(this);
+        tvContent.setText(formatNewsList(newsList));
+        tvContent.setTextSize(13);
+        tvContent.setTextColor(0xFF555555);
+        tvContent.setLineSpacing(0, 1.5f);
+        scrollView.addView(tvContent);
+
+        new AlertDialog.Builder(this)
+                .setTitle("📰 市场要闻 (" + newsList.size() + "条)")
+                .setView(scrollView)
+                .setPositiveButton("关闭", null)
+                .show();
+    }
+
+    // ===== 策略推荐刷新 =====
+
+    private void refreshStrategyRecommendations() {
+        refreshSectorRecommendation();
+        refreshAuctionRecommendation();
+        refreshClosingRecommendation();
+    }
+
+    private void refreshSectorRecommendation() {
+        StrategyRecommendation rec = stockRepository.getSectorRecommendation();
+        if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) {
+            tvSectorList.setVisibility(View.VISIBLE);
+            tvSectorList.setText("等待AI分析...");
+            layoutSectorItems.setVisibility(View.GONE);
+            tvSectorMore.setVisibility(View.GONE);
+            return;
+        }
+
+        tvSectorList.setVisibility(View.GONE);
+        layoutSectorItems.setVisibility(View.VISIBLE);
+        renderRecommendItems(layoutSectorItems, rec, R.drawable.badge_red);
+        tvSectorMore.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshAuctionRecommendation() {
+        StrategyRecommendation rec = stockRepository.getAuctionRecommendation();
+        if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) {
+            tvAuctionList.setVisibility(View.VISIBLE);
+            tvAuctionList.setText("等待AI分析...");
+            layoutAuctionItems.setVisibility(View.GONE);
+            tvAuctionMore.setVisibility(View.GONE);
+            return;
+        }
+
+        tvAuctionList.setVisibility(View.GONE);
+        layoutAuctionItems.setVisibility(View.VISIBLE);
+        renderRecommendItems(layoutAuctionItems, rec, R.drawable.badge_red);
+        tvAuctionMore.setVisibility(View.VISIBLE);
+    }
+
+    private void refreshClosingRecommendation() {
+        StrategyRecommendation rec = stockRepository.getClosingRecommendation();
+        if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) {
+            tvClosingList.setVisibility(View.VISIBLE);
+            tvClosingList.setText("等待AI分析...");
+            layoutClosingItems.setVisibility(View.GONE);
+            tvClosingMore.setVisibility(View.GONE);
+            return;
+        }
+
+        tvClosingList.setVisibility(View.GONE);
+        layoutClosingItems.setVisibility(View.VISIBLE);
+        renderRecommendItems(layoutClosingItems, rec, R.drawable.badge_red);
+        tvClosingMore.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * 动态渲染推荐条目到容器中（名称 + 右侧推荐理由标签）
+     */
+    private void renderRecommendItems(LinearLayout container, StrategyRecommendation rec, int tagBgRes) {
+        container.removeAllViews();
+
+        List<StrategyRecommendation.RecommendItem> items = rec.getItems();
+        if (items == null || items.isEmpty()) return;
+
+        int previewCount = Math.min(3, items.size());
+
+        for (int i = 0; i < previewCount; i++) {
+            StrategyRecommendation.RecommendItem item = items.get(i);
+            if (item.getName() == null || item.getName().isEmpty()) continue;
+
+            LinearLayout itemLayout = new LinearLayout(this);
+            itemLayout.setOrientation(LinearLayout.HORIZONTAL);
+            itemLayout.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            int padV = dpToPx(5);
+            int padH = dpToPx(2);
+            itemLayout.setPadding(padH, padV, padH, padV);
+
+            // 左侧名称
+            TextView tvTitle = new TextView(this);
+            tvTitle.setText("• " + item.getName());
+            tvTitle.setTextColor(0xFFFFFFFF);
+            tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            tvTitle.setMaxLines(1);
+            tvTitle.setSingleLine(true);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            tvTitle.setLayoutParams(nameParams);
+            itemLayout.addView(tvTitle);
+
+            // 右侧推荐理由标签
+            String reasonText = getReasonTag(item);
+            if (reasonText != null && !reasonText.isEmpty()) {
+                TextView tvReason = new TextView(this);
+                tvReason.setText(reasonText);
+                tvReason.setTextColor(0xFFFFFFFF);
+                tvReason.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+                tvReason.setTypeface(null, Typeface.BOLD);
+                tvReason.setMaxLines(1);
+                tvReason.setSingleLine(true);
+                tvReason.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tvReason.setBackgroundResource(R.drawable.tag_reason_bg);
+                LinearLayout.LayoutParams reasonParams = new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                reasonParams.setMarginStart(dpToPx(4));
+                tvReason.setLayoutParams(reasonParams);
+                itemLayout.addView(tvReason);
+            }
+
+            container.addView(itemLayout);
+
+            // 分割线（最后一条不加）
+            if (i < previewCount - 1) {
+                View divider = new View(this);
+                divider.setBackgroundColor(0x15FFFFFF);
+                LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1));
+                divParams.topMargin = dpToPx(2);
+                divParams.bottomMargin = dpToPx(2);
+                divider.setLayoutParams(divParams);
+                container.addView(divider);
+            }
+        }
+    }
+
+    /**
+     * 获取推荐条目的理由标签文本（优先highlight，其次reason截断）
+     */
+    private String getReasonTag(StrategyRecommendation.RecommendItem item) {
+        if (item.getHighlight() != null && !item.getHighlight().isEmpty()) {
+            return item.getHighlight();
+        }
+        if (item.getReason() != null && !item.getReason().isEmpty()) {
+            return item.getReason();
+        }
+        if (item.getTags() != null && !item.getTags().isEmpty()) {
+            return item.getTags().get(0);
+        }
+        return null;
+    }
+
+    /**
+     * 打开推荐详情页
+     */
+    private void openRecommendationDetail(String type) {
+        Intent intent = new Intent(this, RecommendationActivity.class);
+        intent.putExtra("type", type);
+        startActivity(intent);
+    }
+
+    private int dpToPx(int dp) {
+        return (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics());
+    }
+
+    // ===== 策略详情展开/收起 =====
 
     // ===== UI交互 =====
 
@@ -494,12 +819,14 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter();
         filter.addAction(ACTION_DATA_UPDATED);
         filter.addAction(ACTION_ANALYSIS_UPDATED);
+        filter.addAction(ACTION_STRATEGY_UPDATED);
         LocalBroadcastManager.getInstance(this).registerReceiver(dataReceiver, filter);
 
         // 刷新数据
         refreshMarketData();
         refreshAnalysis();
         refreshNews();
+        refreshStrategyRecommendations();
     }
 
     @Override

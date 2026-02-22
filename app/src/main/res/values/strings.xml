@@ -17,4 +17,17 @@
     <string name="ai_waiting">等待AI分析...</string>
     <string name="view_detail">查看详细分析 ▼</string>
     <string name="hide_detail">收起详细分析 ▲</string>
+    <!-- 策略推荐 -->
+    <string name="sector_title">板块推荐</string>
+    <string name="sector_subtitle">热门行业板块分析</string>
+    <string name="sector_waiting">等待AI分析板块行情...</string>
+    <string name="auction_title">开盘竞价推荐</string>
+    <string name="auction_subtitle">集合竞价·短线狙击</string>
+    <string name="auction_tag">游资策略</string>
+    <string name="auction_waiting">等待AI分析竞价数据...</string>
+    <string name="auction_risk_warn">⚠ 游资策略风险较高，请控制仓位</string>
+    <string name="closing_title">尾盘推荐</string>
+    <string name="closing_subtitle">收盘前布局·隔夜持仓</string>
+    <string name="closing_waiting">等待AI分析尾盘机会...</string>
+    <string name="disclaimer">⚠ 免责声明：以上推荐均由AI生成，仅供参考，不构成投资建议。投资有风险，入市需谨慎。</string>
 </resources>
