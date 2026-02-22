@@ -4,8 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import com.gp.stockapp.model.AIRecommendation;
-import com.gp.stockapp.model.StockData;
+import com.gp.stockapp.model.MarketAnalysis;
+import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -17,317 +17,190 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 股票数据仓库
- * 负责数据的存储和查询
+ * 大盘数据仓库
+ * 负责存储和查询大盘指数、AI分析结果和新闻数据
  */
 public class StockRepository {
     private static final String TAG = "StockRepository";
     private static StockRepository instance;
-    
-    private static final String PREF_NAME = "stock_data_prefs";
-    private static final String KEY_WATCH_LIST = "watch_list";
-    private static final String KEY_STOCK_DATA = "stock_data";
-    private static final String KEY_NEWS_DATA = "news_data";
-    private static final String KEY_RECOMMENDATIONS = "recommendations";
-    
+
+    private static final String PREF_NAME = "market_data_prefs";
+    private static final String KEY_INDICES = "market_indices";
+    private static final String KEY_NEWS = "market_news";
+    private static final String KEY_ANALYSIS = "market_analysis";
+    private static final String KEY_ANALYSIS_HISTORY = "analysis_history";
+
     private SharedPreferences preferences;
     private Gson gson;
     private ExecutorService executorService;
-    
+
     private StockRepository(Context context) {
         preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         gson = new Gson();
         executorService = Executors.newSingleThreadExecutor();
     }
-    
+
     public static synchronized StockRepository getInstance(Context context) {
         if (instance == null) {
-            instance = new StockRepository(context);
+            instance = new StockRepository(context.getApplicationContext());
         }
         return instance;
     }
-    
-    // ===== 关注列表管理 =====
-    
+
+    // ===== 指数数据管理 =====
+
     /**
-     * 获取关注列表
+     * 保存大盘指数数据
      */
-    public List<String> getWatchList() {
-        String json = preferences.getString(KEY_WATCH_LIST, "[]");
-        Type type = new TypeToken<List<String>>(){}.getType();
-        List<String> list = gson.fromJson(json, type);
-        return list != null ? list : new ArrayList<>();
-    }
-    
-    /**
-     * 添加到关注列表
-     */
-    public void addToWatchList(String stockCode) {
-        List<String> watchList = getWatchList();
-        if (!watchList.contains(stockCode)) {
-            watchList.add(stockCode);
-            saveWatchList(watchList);
-            Log.d(TAG, "Added to watch list: " + stockCode);
-        }
-    }
-    
-    /**
-     * 从关注列表移除
-     */
-    public void removeFromWatchList(String stockCode) {
-        List<String> watchList = getWatchList();
-        watchList.remove(stockCode);
-        saveWatchList(watchList);
-        Log.d(TAG, "Removed from watch list: " + stockCode);
-    }
-    
-    /**
-     * 更新关注列表
-     */
-    public void updateWatchList(List<String> newWatchList) {
-        saveWatchList(newWatchList);
-        Log.d(TAG, "Updated watch list: " + newWatchList.size() + " stocks");
-    }
-    
-    /**
-     * 保存关注列表
-     */
-    private void saveWatchList(List<String> watchList) {
-        String json = gson.toJson(watchList);
-        preferences.edit().putString(KEY_WATCH_LIST, json).apply();
-    }
-    
-    // ===== 股票数据管理 =====
-    
-    /**
-     * 保存股票数据
-     */
-    public void saveStockData(List<StockData> stockDataList) {
+    public void saveMarketIndices(List<MarketIndex> indices) {
         executorService.execute(() -> {
-            String json = gson.toJson(stockDataList);
-            preferences.edit().putString(KEY_STOCK_DATA, json).apply();
-            Log.d(TAG, "Saved " + stockDataList.size() + " stock data records");
+            // 读取之前的数据，用于对比放量/缩量
+            List<MarketIndex> previousIndices = getMarketIndices();
+            
+            // 为新数据设置前日成交额
+            for (MarketIndex newIndex : indices) {
+                for (MarketIndex prevIndex : previousIndices) {
+                    if (newIndex.getIndexCode() != null && 
+                        newIndex.getIndexCode().equals(prevIndex.getIndexCode())) {
+                        newIndex.setPrevAmount(prevIndex.getAmount());
+                        break;
+                    }
+                }
+            }
+            
+            String json = gson.toJson(indices);
+            preferences.edit().putString(KEY_INDICES, json).apply();
+            Log.d(TAG, "Saved " + indices.size() + " market indices");
         });
     }
-    
+
     /**
-     * 获取所有股票数据
+     * 获取最新的大盘指数数据
      */
-    public List<StockData> getAllStockData() {
-        String json = preferences.getString(KEY_STOCK_DATA, "[]");
-        Type type = new TypeToken<List<StockData>>(){}.getType();
-        List<StockData> list = gson.fromJson(json, type);
+    public List<MarketIndex> getMarketIndices() {
+        String json = preferences.getString(KEY_INDICES, "[]");
+        Type type = new TypeToken<List<MarketIndex>>() {}.getType();
+        List<MarketIndex> list = gson.fromJson(json, type);
         return list != null ? list : new ArrayList<>();
     }
-    
+
     /**
-     * 获取指定股票的数据
+     * 获取指定指数
      */
-    public StockData getStockData(String stockCode) {
-        List<StockData> allData = getAllStockData();
-        for (StockData data : allData) {
-            if (stockCode.equals(data.getStockCode())) {
-                return data;
+    public MarketIndex getMarketIndex(String indexCode) {
+        List<MarketIndex> indices = getMarketIndices();
+        for (MarketIndex index : indices) {
+            if (indexCode.equals(index.getIndexCode())) {
+                return index;
             }
         }
         return null;
     }
-    
+
+    // ===== AI分析结果管理 =====
+
     /**
-     * 获取最新股票数据（按时间戳排序）
+     * 保存最新AI分析结果
      */
-    public List<StockData> getLatestStockData(List<String> stockCodes) {
-        List<StockData> allData = getAllStockData();
-        List<StockData> result = new ArrayList<>();
-        
-        if (stockCodes != null && !stockCodes.isEmpty()) {
-            for (StockData data : allData) {
-                if (stockCodes.contains(data.getStockCode())) {
-                    result.add(data);
-                }
+    public void saveMarketAnalysis(MarketAnalysis analysis) {
+        executorService.execute(() -> {
+            // 保存最新分析
+            String json = gson.toJson(analysis);
+            preferences.edit().putString(KEY_ANALYSIS, json).apply();
+
+            // 追加到历史记录
+            List<MarketAnalysis> history = getAnalysisHistory();
+            history.add(0, analysis);
+            if (history.size() > 20) {
+                history = history.subList(0, 20);
             }
-        } else {
-            result = allData;
-        }
-        
-        // 按时间戳排序（最新的在前）
-        result.sort((d1, d2) -> Long.compare(d2.getTimestamp(), d1.getTimestamp()));
-        
-        return result;
+            String historyJson = gson.toJson(history);
+            preferences.edit().putString(KEY_ANALYSIS_HISTORY, historyJson).apply();
+
+            Log.d(TAG, "Saved market analysis, sentiment: " + analysis.getMarketSentiment());
+        });
     }
-    
+
+    /**
+     * 获取最新AI分析结果
+     */
+    public MarketAnalysis getLatestMarketAnalysis() {
+        String json = preferences.getString(KEY_ANALYSIS, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, MarketAnalysis.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing market analysis", e);
+            return null;
+        }
+    }
+
+    /**
+     * 获取分析历史
+     */
+    public List<MarketAnalysis> getAnalysisHistory() {
+        String json = preferences.getString(KEY_ANALYSIS_HISTORY, "[]");
+        Type type = new TypeToken<List<MarketAnalysis>>() {}.getType();
+        List<MarketAnalysis> list = gson.fromJson(json, type);
+        return list != null ? new ArrayList<>(list) : new ArrayList<>();
+    }
+
     // ===== 新闻数据管理 =====
-    
+
     /**
      * 保存新闻数据
      */
     public void saveNewsData(List<StockNews> newsList) {
         executorService.execute(() -> {
             String json = gson.toJson(newsList);
-            preferences.edit().putString(KEY_NEWS_DATA, json).apply();
+            preferences.edit().putString(KEY_NEWS, json).apply();
             Log.d(TAG, "Saved " + newsList.size() + " news records");
         });
     }
-    
+
     /**
      * 获取所有新闻
      */
     public List<StockNews> getAllNews() {
-        String json = preferences.getString(KEY_NEWS_DATA, "[]");
-        Type type = new TypeToken<List<StockNews>>(){}.getType();
+        String json = preferences.getString(KEY_NEWS, "[]");
+        Type type = new TypeToken<List<StockNews>>() {}.getType();
         List<StockNews> list = gson.fromJson(json, type);
         return list != null ? list : new ArrayList<>();
     }
-    
+
     /**
      * 获取最新新闻
      */
     public List<StockNews> getLatestNews(int limit) {
         List<StockNews> allNews = getAllNews();
-        
-        // 按发布时间排序
         allNews.sort((n1, n2) -> Long.compare(n2.getPublishTime(), n1.getPublishTime()));
-        
-        // 返回前N条
         if (allNews.size() > limit) {
             return allNews.subList(0, limit);
         }
         return allNews;
     }
-    
-    /**
-     * 获取高影响力新闻
-     */
-    public List<StockNews> getHighImpactNews() {
-        List<StockNews> allNews = getAllNews();
-        List<StockNews> highImpact = new ArrayList<>();
-        
-        for (StockNews news : allNews) {
-            if (news.isHighImpact()) {
-                highImpact.add(news);
-            }
-        }
-        
-        return highImpact;
-    }
-    
-    // ===== 推荐数据管理 =====
-    
-    /**
-     * 保存推荐结果
-     */
-    public void saveRecommendation(AIRecommendation recommendation) {
-        List<AIRecommendation> recommendations = getAllRecommendations();
-        
-        // 移除同一股票的旧推荐
-        recommendations.removeIf(r -> r.getStockCode().equals(recommendation.getStockCode()));
-        
-        // 添加新推荐
-        recommendations.add(0, recommendation);
-        
-        // 只保留最近50条推荐
-        if (recommendations.size() > 50) {
-            recommendations = recommendations.subList(0, 50);
-        }
-        
-        String json = gson.toJson(recommendations);
-        preferences.edit().putString(KEY_RECOMMENDATIONS, json).apply();
-        
-        Log.d(TAG, "Saved recommendation: " + recommendation.getStockCode());
-    }
-    
-    /**
-     * 获取所有推荐
-     */
-    public List<AIRecommendation> getAllRecommendations() {
-        String json = preferences.getString(KEY_RECOMMENDATIONS, "[]");
-        Type type = new TypeToken<List<AIRecommendation>>(){}.getType();
-        List<AIRecommendation> list = gson.fromJson(json, type);
-        return list != null ? list : new ArrayList<>();
-    }
-    
-    /**
-     * 获取高置信度推荐（置信度>=80%）
-     */
-    public List<AIRecommendation> getHighConfidenceRecommendations() {
-        List<AIRecommendation> all = getAllRecommendations();
-        List<AIRecommendation> highConfidence = new ArrayList<>();
-        
-        for (AIRecommendation rec : all) {
-            if (rec.getConfidence() >= 80.0) {
-                highConfidence.add(rec);
-            }
-        }
-        
-        return highConfidence;
-    }
-    
-    /**
-     * 获取指定类型的推荐
-     */
-    public List<AIRecommendation> getRecommendationsByType(String type) {
-        List<AIRecommendation> all = getAllRecommendations();
-        List<AIRecommendation> filtered = new ArrayList<>();
-        
-        for (AIRecommendation rec : all) {
-            if (type.equals(rec.getRecommendType())) {
-                filtered.add(rec);
-            }
-        }
-        
-        return filtered;
-    }
-    
-    // ===== 其他实用方法 =====
-    
+
+    // ===== 清理 =====
+
     /**
      * 清除所有数据
      */
     public void clearAllData() {
         preferences.edit().clear().apply();
-        Log.d(TAG, "Cleared all data");
+        Log.d(TAG, "All data cleared");
     }
-    
-    /**
-     * 清除过期数据（24小时前）
-     */
-    public void clearExpiredData() {
-        long expiryTime = System.currentTimeMillis() - 24 * 60 * 60 * 1000; // 24小时前
-        
-        // 清除过期的新闻
-        List<StockNews> news = getAllNews();
-        news.removeIf(n -> n.getPublishTime() < expiryTime);
-        
-        // 清除过期的推荐
-        List<AIRecommendation> recs = getAllRecommendations();
-        recs.removeIf(r -> r.getTimestamp() < expiryTime);
-        
-        saveNewsData(news);
-        // 重新保存推荐
-        String json = gson.toJson(recs);
-        preferences.edit().putString(KEY_RECOMMENDATIONS, json).apply();
-        
-        Log.d(TAG, "Cleared expired data");
-    }
-    
+
     /**
      * 获取数据统计
      */
     public String getDataStatistics() {
-        List<String> watchList = getWatchList();
-        List<StockData> stockData = getAllStockData();
+        List<MarketIndex> indices = getMarketIndices();
         List<StockNews> news = getAllNews();
-        List<AIRecommendation> recommendations = getAllRecommendations();
-        
+        List<MarketAnalysis> history = getAnalysisHistory();
+
         return String.format(
-            "关注股票: %d只\n" +
-            "股票数据: %d条\n" +
-            "新闻数据: %d条\n" +
-            "AI推荐: %d条",
-            watchList.size(),
-            stockData.size(),
-            news.size(),
-            recommendations.size()
+                "指数数据: %d条\n新闻数据: %d条\nAI分析: %d条",
+                indices.size(), news.size(), history.size()
         );
     }
 }

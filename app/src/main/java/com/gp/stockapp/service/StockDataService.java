@@ -5,20 +5,20 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.gp.stockapp.MainActivity;
-import com.gp.stockapp.api.StockApi;
-import com.gp.stockapp.model.StockData;
+import com.gp.stockapp.api.MarketApi;
+import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.gp.stockapp.repository.StockRepository;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -26,139 +26,113 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 股票数据抓取服务
- * 负责循环抓取股票实时数据和新闻数据
+ * 大盘数据抓取服务
+ * 循环抓取三大指数实时数据和市场新闻
  */
 public class StockDataService extends Service {
     private static final String TAG = "StockDataService";
-    private static final String CHANNEL_ID = "StockDataChannel";
+    private static final String CHANNEL_ID = "MarketDataChannel";
     private static final int NOTIFICATION_ID = 1;
-    private static final long FETCH_INTERVAL = 30000; // 30秒抓取一次
-    
+    private static final long FETCH_INTERVAL = 30000; // 30秒刷新一次
+
     private StockRepository stockRepository;
-    private StockApi stockApi;
+    private MarketApi marketApi;
     private ExecutorService executorService;
     private Timer fetchTimer;
     private boolean isRunning = false;
-    
-    // 关注的股票代码列表
-    private List<String> watchList = new ArrayList<>();
-    
+
     @Override
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "StockDataService created");
-        
-        stockRepository = new StockRepository(getApplicationContext());
-        stockApi = StockApi.getInstance();
-        executorService = Executors.newFixedThreadPool(3);
-        
+
+        stockRepository = StockRepository.getInstance(getApplicationContext());
+        marketApi = MarketApi.getInstance();
+        executorService = Executors.newFixedThreadPool(2);
+
         createNotificationChannel();
-        loadWatchList();
     }
-    
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "StockDataService started");
-        
-        startForeground(NOTIFICATION_ID, createNotification());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, createNotification("正在获取大盘数据..."),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification("正在获取大盘数据..."));
+        }
         startDataFetching();
-        
         return START_STICKY;
     }
-    
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
     }
-    
+
     @Override
     public void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "StockDataService destroyed");
-        
         stopDataFetching();
         if (executorService != null) {
             executorService.shutdown();
         }
     }
-    
-    /**
-     * 创建通知渠道
-     */
+
     private void createNotificationChannel() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "股票数据服务",
-                NotificationManager.IMPORTANCE_LOW
+                    CHANNEL_ID,
+                    "大盘数据监控",
+                    NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("实时抓取股票数据");
+            channel.setDescription("实时抓取大盘指数数据");
             channel.setShowBadge(false);
-            
+
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
             }
         }
     }
-    
-    /**
-     * 创建前台服务通知
-     */
-    private Notification createNotification() {
+
+    private Notification createNotification(String text) {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
+                this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
         );
-        
+
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("股票数据抓取中")
-            .setContentText("正在实时抓取股票数据和新闻")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build();
+                .setContentTitle("大盘AI助手")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build();
     }
-    
-    /**
-     * 加载关注列表
-     */
-    private void loadWatchList() {
-        executorService.execute(() -> {
-            watchList = stockRepository.getWatchList();
-            Log.d(TAG, "Loaded watch list: " + watchList.size() + " stocks");
-        });
-    }
-    
-    /**
-     * 开始数据抓取
-     */
+
     private void startDataFetching() {
-        if (isRunning) {
-            return;
-        }
-        
+        if (isRunning) return;
+
         isRunning = true;
         fetchTimer = new Timer();
-        
+
         // 立即执行一次
-        fetchStockData();
-        
+        fetchMarketData();
+
         // 定时执行
         fetchTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
-                fetchStockData();
+                fetchMarketData();
             }
         }, FETCH_INTERVAL, FETCH_INTERVAL);
-        
-        Log.d(TAG, "Data fetching started");
+
+        Log.d(TAG, "Data fetching started, interval: " + FETCH_INTERVAL + "ms");
     }
-    
-    /**
-     * 停止数据抓取
-     */
+
     private void stopDataFetching() {
         isRunning = false;
         if (fetchTimer != null) {
@@ -167,100 +141,64 @@ public class StockDataService extends Service {
         }
         Log.d(TAG, "Data fetching stopped");
     }
-    
+
     /**
-     * 抓取股票数据
+     * 抓取大盘数据
      */
-    private void fetchStockData() {
-        Log.d(TAG, "Fetching stock data...");
-        
+    private void fetchMarketData() {
         executorService.execute(() -> {
             try {
-                // 抓取实时行情数据
-                List<StockData> stockDataList = stockApi.fetchRealTimeData(watchList);
-                if (stockDataList != null && !stockDataList.isEmpty()) {
-                    stockRepository.saveStockData(stockDataList);
-                    Log.d(TAG, "Saved " + stockDataList.size() + " stock data records");
+                // 抓取三大指数数据
+                List<MarketIndex> indices = marketApi.fetchMarketIndices();
+                if (indices != null && !indices.isEmpty()) {
+                    stockRepository.saveMarketIndices(indices);
+
+                    // 更新通知
+                    updateNotification(indices);
+
+                    // 通知UI刷新
+                    sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
+
+                    Log.d(TAG, "Market indices updated: " + indices.size());
                 }
-                
-                // 抓取新闻数据
-                List<StockNews> newsList = stockApi.fetchNewsData();
+
+                // 抓取市场新闻
+                List<StockNews> newsList = marketApi.fetchMarketNews();
                 if (newsList != null && !newsList.isEmpty()) {
                     stockRepository.saveNewsData(newsList);
-                    Log.d(TAG, "Saved " + newsList.size() + " news records");
                 }
-                
-                // 检查是否有重要信号
-                checkImportantSignals(stockDataList);
-                
+
             } catch (Exception e) {
-                Log.e(TAG, "Error fetching stock data", e);
+                Log.e(TAG, "Error fetching market data", e);
             }
         });
     }
-    
+
     /**
-     * 检查重要信号
+     * 更新通知栏显示
      */
-    private void checkImportantSignals(List<StockData> stockDataList) {
-        if (stockDataList == null || stockDataList.isEmpty()) {
-            return;
+    private void updateNotification(List<MarketIndex> indices) {
+        StringBuilder text = new StringBuilder();
+        for (MarketIndex index : indices) {
+            if (text.length() > 0) text.append(" | ");
+            text.append(index.getIndexName())
+                    .append(" ")
+                    .append(String.format("%.0f", index.getCurrentPoint()))
+                    .append(" ")
+                    .append(index.getFormattedChangePercent());
         }
-        
-        for (StockData data : stockDataList) {
-            // 检查量化信号
-            if (data.hasQuantSignal()) {
-                Log.d(TAG, "Quant signal detected: " + data.getStockCode());
-                sendSignalNotification(data.getStockCode(), data.getStockName(), "量化信号");
-            }
-            
-            // 检查游资信号
-            if (data.isHotStock()) {
-                Log.d(TAG, "Hot money signal detected: " + data.getStockCode());
-                sendSignalNotification(data.getStockCode(), data.getStockName(), "游资信号");
-            }
+
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, createNotification(text.toString()));
         }
     }
-    
+
     /**
-     * 发送信号通知
+     * 发送广播通知UI更新
      */
-    private void sendSignalNotification(String stockCode, String stockName, String signalType) {
-        // 这里可以发送推送通知
-        Log.d(TAG, "Signal notification: " + stockCode + " - " + signalType);
-    }
-    
-    /**
-     * 添加股票到关注列表
-     */
-    public void addToWatchList(String stockCode) {
-        executorService.execute(() -> {
-            stockRepository.addToWatchList(stockCode);
-            watchList.add(stockCode);
-            Log.d(TAG, "Added to watch list: " + stockCode);
-        });
-    }
-    
-    /**
-     * 从关注列表移除股票
-     */
-    public void removeFromWatchList(String stockCode) {
-        executorService.execute(() -> {
-            stockRepository.removeFromWatchList(stockCode);
-            watchList.remove(stockCode);
-            Log.d(TAG, "Removed from watch list: " + stockCode);
-        });
-    }
-    
-    /**
-     * 更新关注列表
-     */
-    public void updateWatchList(List<String> newWatchList) {
-        executorService.execute(() -> {
-            stockRepository.updateWatchList(newWatchList);
-            watchList.clear();
-            watchList.addAll(newWatchList);
-            Log.d(TAG, "Updated watch list: " + watchList.size() + " stocks");
-        });
+    private void sendBroadcast(String action) {
+        Intent intent = new Intent(action);
+        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
     }
 }

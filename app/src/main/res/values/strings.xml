@@ -1,23 +1,20 @@
 <resources>
-    <string name="app_name">股票AI推荐</string>
-    <string name="start_service">启动服务</string>
-    <string name="stop_service">停止服务</string>
-    <string name="add_stock">添加关注</string>
-    <string name="remove_stock">移除关注</string>
-    <string name="test_api">测试API连接</string>
+    <string name="app_name">大盘AI助手</string>
+    <string name="start_monitor">开始监控</string>
+    <string name="stop_monitor">停止监控</string>
+    <string name="settings">设置</string>
     <string name="api_key_hint">请输入智谱AI的API密钥</string>
-    <string name="stock_code_hint">输入股票代码（如：600000）</string>
-    <string name="status_service_not_started">状态: 服务未启动</string>
-    <string name="status_service_started">状态: 服务已启动</string>
-    <string name="status_service_stopped">状态: 服务已停止</string>
+    <string name="status_not_started">服务未启动</string>
+    <string name="status_running">监控运行中</string>
+    <string name="status_stopped">监控已停止</string>
     <string name="toast_api_key_required">请先设置API密钥</string>
-    <string name="toast_stock_code_required">请输入股票代码</string>
-    <string name="toast_service_started">服务已启动</string>
-    <string name="toast_service_stopped">服务已停止</string>
+    <string name="toast_monitor_started">监控已启动</string>
+    <string name="toast_monitor_stopped">监控已停止</string>
     <string name="toast_api_connected">API连接成功</string>
     <string name="toast_api_failed">API连接失败</string>
-    <string name="toast_added_to_watchlist">已添加到关注列表</string>
-    <string name="toast_removed_from_watchlist">已从关注列表移除</string>
-    <string name="toast_permissions_granted">权限已授予</string>
-    <string name="toast_permissions_denied">部分权限未授予</string>
+    <string name="toast_api_key_saved">API密钥已保存</string>
+    <string name="no_news">暂无新闻数据</string>
+    <string name="ai_waiting">等待AI分析...</string>
+    <string name="view_detail">查看详细分析 ▼</string>
+    <string name="hide_detail">收起详细分析 ▲</string>
 </resources>

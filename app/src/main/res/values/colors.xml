@@ -1,15 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <!-- 主题色 -->
+    <color name="primary">#FF1A237E</color>
+    <color name="primary_dark">#FF0D1B4A</color>
+    <color name="primary_light">#FF283593</color>
+    <color name="accent">#FF1A73E8</color>
+
+    <!-- 基础色 -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    
-    <!-- 股票颜色 -->
-    <color name="stock_up">#FFFF0000</color> <!-- 红色上涨 -->
-    <color name="stock_down">#FF00FF00</color> <!-- 绿色下跌 -->
-    <color name="stock_flat">#FF999999</color> <!-- 灰色平盘 -->
+    <color name="background">#FFF5F5F5</color>
+    <color name="card_bg">#FFFFFFFF</color>
+
+    <!-- 文字色 -->
+    <color name="text_primary">#FF212121</color>
+    <color name="text_secondary">#FF666666</color>
+    <color name="text_hint">#FF999999</color>
+
+    <!-- A股行情色（红涨绿跌） -->
+    <color name="stock_up">#FFE53935</color>
+    <color name="stock_down">#FF43A047</color>
+    <color name="stock_flat">#FF9E9E9E</color>
+
+    <!-- 风险指示色 -->
+    <color name="risk_low">#FF43A047</color>
+    <color name="risk_medium">#FFFF9800</color>
+    <color name="risk_high">#FFE53935</color>
 </resources>
