@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.gp.stockapp.MainActivity;
+import com.gp.stockapp.R;
 import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.api.HotStockApi;
 import com.gp.stockapp.api.MarketApi;
@@ -115,9 +116,9 @@ public class StockDataService extends Service {
         );
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("大盘AI助手")
+                .setContentTitle(getString(R.string.app_name))
                 .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_gp_tool_logo)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .build();

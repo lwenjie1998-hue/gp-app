@@ -17,7 +17,7 @@
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             app:titleTextColor="@color/white"
-            app:title="大盘AI助手" />
+            app:title="@string/app_name" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -336,7 +336,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="🤖 AI大盘分析"
+                            android:text="🤖 AI 策略分析"
                             android:textColor="#1A237E"
                             android:textSize="14sp"
                             android:textStyle="bold" />

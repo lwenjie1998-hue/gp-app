@@ -17,7 +17,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="请输入智谱AI (GLM-4) 的API密钥，用于驱动AI大盘分析功能。"
+        android:text="请输入智谱AI (GLM-4) 的API密钥，用于驱动AI策略分析功能。"
         android:textSize="13sp"
         android:textColor="#666666"
         android:layout_marginBottom="16dp"/>

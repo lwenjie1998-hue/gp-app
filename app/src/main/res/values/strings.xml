@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">大盘AI助手</string>
+    <string name="app_name">GP-Tool</string>
     <string name="start_monitor">开始监控</string>
     <string name="stop_monitor">停止监控</string>
     <string name="settings">设置</string>

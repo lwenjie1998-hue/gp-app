@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 主界面 - 大盘AI助手
+ * 主界面 - GP-Tool
  * 展示三大指数实时行情和AI分析结果
  */
 public class MainActivity extends AppCompatActivity {
@@ -126,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
-            getSupportActionBar().setTitle("大盘AI助手");
+            getSupportActionBar().setTitle(R.string.app_name);
         }
     }
 

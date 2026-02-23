@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName;
 import java.util.List;
 
 /**
- * AI大盘分析结果模型
+ * AI策略分析结果模型
  */
 public class MarketAnalysis {
 

@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.gp.stockapp.MainActivity;
+import com.gp.stockapp.R;
 import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketAnalysis;
@@ -121,7 +122,7 @@ public class AIRecommendationService extends Service {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "AI大盘分析",
+                    getString(R.string.app_name) + " 分析",
                     NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("AI智能分析大盘走势");
@@ -141,9 +142,9 @@ public class AIRecommendationService extends Service {
         );
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("AI大盘分析")
+                .setContentTitle(getString(R.string.app_name) + " AI分析")
                 .setContentText("正在分析大盘走势...")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_gp_tool_logo)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
                 .build();
