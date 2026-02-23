@@ -37,7 +37,7 @@ public class StockDataService extends Service {
     private static final String TAG = "StockDataService";
     private static final String CHANNEL_ID = "MarketDataChannel";
     private static final int NOTIFICATION_ID = 1;
-    private static final long FETCH_INTERVAL = 30000; // 30秒刷新一次
+    private static final long FETCH_INTERVAL = 60000; // 1分钟刷新一次
 
     private StockRepository stockRepository;
     private MarketApi marketApi;

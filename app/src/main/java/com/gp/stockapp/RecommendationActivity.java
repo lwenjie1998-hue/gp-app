@@ -24,6 +24,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.service.AIRecommendationService;
+import com.gp.stockapp.utils.StockAppHelper;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -179,35 +180,103 @@ public class RecommendationActivity extends AppCompatActivity {
     private void displayRecommendation(StrategyRecommendation rec) {
         layoutContent.removeAllViews();
 
-        // 显示摘要和时间
+        // === 顶部信息卡片：摘要 + 时间 + 情绪/主线/风险 ===
+        LinearLayout headerCard = new LinearLayout(this);
+        headerCard.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable headerBg = new android.graphics.drawable.GradientDrawable();
+        headerBg.setCornerRadius(dpToPx(12));
+        headerBg.setColor(0xFFF5F5F5);
+        headerCard.setBackground(headerBg);
+        headerCard.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        headerParams.bottomMargin = dpToPx(14);
+        headerCard.setLayoutParams(headerParams);
+
+        // 摘要
         if (rec.getSummary() != null && !rec.getSummary().isEmpty()) {
             TextView tvSummary = new TextView(this);
             tvSummary.setText(rec.getSummary());
             tvSummary.setTextColor(0xFF333333);
             tvSummary.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             tvSummary.setLineSpacing(0, 1.4f);
-            LinearLayout.LayoutParams summaryParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            summaryParams.bottomMargin = dpToPx(16);
-            tvSummary.setLayoutParams(summaryParams);
-            layoutContent.addView(tvSummary);
+            headerCard.addView(tvSummary);
         }
 
-        // 显示时间
+        // 游资情绪/主线/隔夜风险信息行
+        boolean hasSentiment = rec.getMarketSentiment() != null && !rec.getMarketSentiment().isEmpty();
+        boolean hasMainLine = rec.getMainLine() != null && !rec.getMainLine().isEmpty();
+        boolean hasOvernightRisk = rec.getOvernightRisk() != null && !rec.getOvernightRisk().isEmpty();
+
+        if (hasSentiment || hasMainLine || hasOvernightRisk) {
+            com.google.android.flexbox.FlexboxLayout infoFlow = new com.google.android.flexbox.FlexboxLayout(this);
+            infoFlow.setFlexWrap(com.google.android.flexbox.FlexWrap.WRAP);
+            infoFlow.setFlexDirection(com.google.android.flexbox.FlexDirection.ROW);
+            LinearLayout.LayoutParams infoFlowParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            infoFlowParams.topMargin = dpToPx(8);
+            infoFlow.setLayoutParams(infoFlowParams);
+
+            if (hasSentiment) {
+                infoFlow.addView(createInfoChip("\ud83d\udcca " + rec.getMarketSentiment(), 0xFF1565C0, 0xFFE3F2FD));
+            }
+            if (hasMainLine) {
+                infoFlow.addView(createInfoChip("\ud83d\udd25 " + rec.getMainLine(), 0xFFE65100, 0xFFFFF3E0));
+            }
+            if (hasOvernightRisk) {
+                infoFlow.addView(createInfoChip("\u26a0 隔夜: " + rec.getOvernightRisk(), 0xFFB71C1C, 0xFFFFEBEE));
+            }
+
+            headerCard.addView(infoFlow);
+        }
+
+        // 风险等级和置信度
+        if (rec.getRiskLevel() != null || rec.getConfidence() > 0) {
+            LinearLayout riskRow = new LinearLayout(this);
+            riskRow.setOrientation(LinearLayout.HORIZONTAL);
+            riskRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams riskParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            riskParams.topMargin = dpToPx(8);
+            riskRow.setLayoutParams(riskParams);
+
+            if (rec.getRiskLevel() != null) {
+                TextView tvRisk = new TextView(this);
+                tvRisk.setText("风险: " + rec.getRiskText());
+                tvRisk.setTextColor(rec.getRiskColor());
+                tvRisk.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                tvRisk.setTypeface(null, Typeface.BOLD);
+                riskRow.addView(tvRisk);
+            }
+
+            if (rec.getConfidence() > 0) {
+                TextView tvConf = new TextView(this);
+                tvConf.setText(String.format(Locale.CHINA, "  置信度: %.0f%%", rec.getConfidence()));
+                tvConf.setTextColor(0xFF999999);
+                tvConf.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                riskRow.addView(tvConf);
+            }
+
+            headerCard.addView(riskRow);
+        }
+
+        // 更新时间
         if (rec.getTimestamp() > 0) {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA);
             TextView tvTime = new TextView(this);
-            tvTime.setText("更新时间：" + sdf.format(new Date(rec.getTimestamp())));
-            tvTime.setTextColor(0xFF999999);
-            tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            tvTime.setText("更新于 " + sdf.format(new Date(rec.getTimestamp())));
+            tvTime.setTextColor(0xFFBDBDBD);
+            tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            timeParams.bottomMargin = dpToPx(20);
+            timeParams.topMargin = dpToPx(6);
             tvTime.setLayoutParams(timeParams);
-            layoutContent.addView(tvTime);
+            headerCard.addView(tvTime);
         }
 
-        // 显示推荐列表
+        layoutContent.addView(headerCard);
+
+        // === 推荐列表 ===
         List<StrategyRecommendation.RecommendItem> items = rec.getItems();
         for (int i = 0; i < items.size(); i++) {
             StrategyRecommendation.RecommendItem item = items.get(i);
@@ -217,7 +286,7 @@ public class RecommendationActivity extends AppCompatActivity {
             layoutContent.addView(itemView);
         }
 
-        // 显示详细分析
+        // === 详细分析 ===
         if (rec.getAnalysisText() != null && !rec.getAnalysisText().isEmpty()) {
             TextView tvAnalysisTitle = new TextView(this);
             tvAnalysisTitle.setText("详细分析");
@@ -226,8 +295,8 @@ public class RecommendationActivity extends AppCompatActivity {
             tvAnalysisTitle.setTypeface(null, Typeface.BOLD);
             LinearLayout.LayoutParams analysisTitleParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            analysisTitleParams.topMargin = dpToPx(24);
-            analysisTitleParams.bottomMargin = dpToPx(12);
+            analysisTitleParams.topMargin = dpToPx(20);
+            analysisTitleParams.bottomMargin = dpToPx(10);
             tvAnalysisTitle.setLayoutParams(analysisTitleParams);
             layoutContent.addView(tvAnalysisTitle);
 
@@ -241,63 +310,133 @@ public class RecommendationActivity extends AppCompatActivity {
     }
 
     private View createRecommendItemView(StrategyRecommendation.RecommendItem item, int index) {
-        // 外层卡片容器
+        // 外层卡片容器 - 圆角阴影卡片
         LinearLayout card = new LinearLayout(this);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = dpToPx(12);
+        cardParams.bottomMargin = dpToPx(10);
         card.setLayoutParams(cardParams);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.card_item_transparent);
-        card.setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14));
-        card.setBackgroundColor(0xFFFFFFFF);
+        card.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
+
+        // 设置圆角白色背景
+        android.graphics.drawable.GradientDrawable cardBg = new android.graphics.drawable.GradientDrawable();
+        cardBg.setCornerRadius(dpToPx(12));
+        cardBg.setColor(0xFFFFFFFF);
+        card.setBackground(cardBg);
         card.setElevation(dpToPx(2));
 
-        // 第一行：序号 + 名称 + 评分
+        // === 第一行：序号徽标 + 名称 + 代码 + 评分 ===
         LinearLayout row1 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setGravity(Gravity.CENTER_VERTICAL);
 
-        // 序号
+        // 序号徽标（彩色圆形）
         TextView tvIndex = new TextView(this);
         tvIndex.setText(String.valueOf(index));
-        tvIndex.setTextColor(0xFF666666);
-        tvIndex.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tvIndex.setTextColor(0xFFFFFFFF);
+        tvIndex.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tvIndex.setTypeface(null, Typeface.BOLD);
         tvIndex.setGravity(Gravity.CENTER);
-        tvIndex.setWidth(dpToPx(24));
+        int indexSize = dpToPx(22);
+        LinearLayout.LayoutParams indexParams = new LinearLayout.LayoutParams(indexSize, indexSize);
+        tvIndex.setLayoutParams(indexParams);
+        // 根据排名设置不同颜色
+        android.graphics.drawable.GradientDrawable indexBg = new android.graphics.drawable.GradientDrawable();
+        indexBg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        if (index == 1) indexBg.setColor(0xFFE53935);       // 第1名红色
+        else if (index == 2) indexBg.setColor(0xFFFF9800);  // 第2名橙色
+        else if (index == 3) indexBg.setColor(0xFFFFC107);  // 第3名黄色
+        else indexBg.setColor(0xFF90A4AE);                  // 其他灰蓝色
+        tvIndex.setBackground(indexBg);
         row1.addView(tvIndex);
 
         // 名称
         TextView tvName = new TextView(this);
-        tvName.setText(item.getName() != null ? item.getName() : "--");
-        tvName.setTextColor(0xFF333333);
-        tvName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        String displayName = item.getName() != null ? item.getName() : "--";
+        tvName.setText(displayName);
+        tvName.setTextColor(0xFF212121);
+        tvName.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         tvName.setTypeface(null, Typeface.BOLD);
         LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        nameParams.leftMargin = dpToPx(8);
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nameParams.leftMargin = dpToPx(10);
         tvName.setLayoutParams(nameParams);
+
+        // 如果有股票代码，名称可点击跳转同花顺
+        boolean hasStockCode = item.getCode() != null && !item.getCode().isEmpty() && item.getCode().matches("\\d{6}");
+        if (hasStockCode) {
+            tvName.setTextColor(0xFF1565C0);
+            tvName.setOnClickListener(v -> StockAppHelper.openInTongHuaShun(this, item.getCode(), item.getName()));
+        }
         row1.addView(tvName);
+
+        // 股票代码标签
+        if (hasStockCode) {
+            TextView tvCode = new TextView(this);
+            tvCode.setText(item.getCode());
+            tvCode.setTextColor(0xFF9E9E9E);
+            tvCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            codeParams.leftMargin = dpToPx(6);
+            tvCode.setLayoutParams(codeParams);
+            row1.addView(tvCode);
+        }
+
+        // 弹簧占位
+        View spacer = new View(this);
+        spacer.setLayoutParams(new LinearLayout.LayoutParams(0, 0, 1f));
+        row1.addView(spacer);
+
+        // 亮点标签（highlight）
+        if (item.getHighlight() != null && !item.getHighlight().isEmpty()) {
+            TextView tvHighlight = new TextView(this);
+            tvHighlight.setText(item.getHighlight());
+            tvHighlight.setTextColor(0xFFFFFFFF);
+            tvHighlight.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+            tvHighlight.setTypeface(null, Typeface.BOLD);
+            android.graphics.drawable.GradientDrawable hlBg = new android.graphics.drawable.GradientDrawable();
+            hlBg.setCornerRadius(dpToPx(4));
+            hlBg.setColor(0xFFFF6D00);
+            tvHighlight.setBackground(hlBg);
+            tvHighlight.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+            LinearLayout.LayoutParams hlParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            hlParams.rightMargin = dpToPx(8);
+            tvHighlight.setLayoutParams(hlParams);
+            row1.addView(tvHighlight);
+        }
 
         // 评分
         if (item.getScore() > 0) {
             TextView tvScore = new TextView(this);
-            tvScore.setText(String.format(Locale.CHINA, "%.0f分", item.getScore()));
+            tvScore.setText(String.format(Locale.CHINA, "%.0f", item.getScore()));
             tvScore.setTextColor(item.getScoreColor());
-            tvScore.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            tvScore.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
             tvScore.setTypeface(null, Typeface.BOLD);
             row1.addView(tvScore);
+
+            TextView tvScoreUnit = new TextView(this);
+            tvScoreUnit.setText("分");
+            tvScoreUnit.setTextColor(0xFF999999);
+            tvScoreUnit.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+            LinearLayout.LayoutParams unitParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            unitParams.leftMargin = dpToPx(2);
+            tvScoreUnit.setLayoutParams(unitParams);
+            row1.addView(tvScoreUnit);
         }
 
         card.addView(row1);
 
-        // 推荐理由
+        // === 推荐理由 ===
         if (item.getReason() != null && !item.getReason().isEmpty()) {
             TextView tvReason = new TextView(this);
-            tvReason.setText("推荐理由：" + item.getReason());
-            tvReason.setTextColor(0xFF666666);
+            tvReason.setText(item.getReason());
+            tvReason.setTextColor(0xFF616161);
             tvReason.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            tvReason.setLineSpacing(0, 1.4f);
+            tvReason.setLineSpacing(0, 1.3f);
             LinearLayout.LayoutParams reasonParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             reasonParams.topMargin = dpToPx(8);
@@ -306,26 +445,88 @@ public class RecommendationActivity extends AppCompatActivity {
             card.addView(tvReason);
         }
 
-        // 关联个股标签
+        // === 介入时机 / 止损位 / 次日预案 - 横排标签 ===
+        boolean hasEntryTiming = item.getEntryTiming() != null && !item.getEntryTiming().isEmpty();
+        boolean hasStopLoss = item.getStopLoss() != null && !item.getStopLoss().isEmpty();
+        boolean hasNextDayPlan = item.getNextDayPlan() != null && !item.getNextDayPlan().isEmpty();
+
+        if (hasEntryTiming || hasStopLoss || hasNextDayPlan) {
+            LinearLayout infoRow = new LinearLayout(this);
+            infoRow.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            infoParams.topMargin = dpToPx(8);
+            infoParams.leftMargin = dpToPx(32);
+            infoRow.setLayoutParams(infoParams);
+
+            if (hasEntryTiming) {
+                TextView tvEntry = new TextView(this);
+                tvEntry.setText("\u23f0 介入时机：" + item.getEntryTiming());
+                tvEntry.setTextColor(0xFF1565C0);
+                tvEntry.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                tvEntry.setLineSpacing(0, 1.3f);
+                infoRow.addView(tvEntry);
+            }
+
+            if (hasStopLoss) {
+                TextView tvStop = new TextView(this);
+                tvStop.setText("\u26a0 止损位：" + item.getStopLoss());
+                tvStop.setTextColor(0xFFE53935);
+                tvStop.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                tvStop.setLineSpacing(0, 1.3f);
+                LinearLayout.LayoutParams stopParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (hasEntryTiming) stopParams.topMargin = dpToPx(3);
+                tvStop.setLayoutParams(stopParams);
+                infoRow.addView(tvStop);
+            }
+
+            if (hasNextDayPlan) {
+                TextView tvPlan = new TextView(this);
+                tvPlan.setText("\ud83d\udcdd 次日预案：" + item.getNextDayPlan());
+                tvPlan.setTextColor(0xFF4527A0);
+                tvPlan.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                tvPlan.setLineSpacing(0, 1.3f);
+                LinearLayout.LayoutParams planParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (hasEntryTiming || hasStopLoss) planParams.topMargin = dpToPx(3);
+                tvPlan.setLayoutParams(planParams);
+                infoRow.addView(tvPlan);
+            }
+
+            card.addView(infoRow);
+        }
+
+        // === 关联个股标签 ===
         if (item.getRelatedStocks() != null && !item.getRelatedStocks().isEmpty()) {
+            // 分隔线
+            View divider = new View(this);
+            divider.setBackgroundColor(0x0F000000);
+            LinearLayout.LayoutParams divParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(1));
+            divParams.topMargin = dpToPx(10);
+            divParams.bottomMargin = dpToPx(8);
+            divParams.leftMargin = dpToPx(32);
+            divider.setLayoutParams(divParams);
+            card.addView(divider);
+
             TextView tvStocksLabel = new TextView(this);
-            tvStocksLabel.setText("关联个股：");
-            tvStocksLabel.setTextColor(0xFF999999);
+            tvStocksLabel.setText("关联个股");
+            tvStocksLabel.setTextColor(0xFF9E9E9E);
             tvStocksLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             LinearLayout.LayoutParams stocksLabelParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            stocksLabelParams.topMargin = dpToPx(8);
             stocksLabelParams.leftMargin = dpToPx(32);
+            stocksLabelParams.bottomMargin = dpToPx(4);
             tvStocksLabel.setLayoutParams(stocksLabelParams);
             card.addView(tvStocksLabel);
 
-            // 标签容器
+            // 标签流布局容器
             com.google.android.flexbox.FlexboxLayout tagContainer = new com.google.android.flexbox.FlexboxLayout(this);
             tagContainer.setFlexWrap(com.google.android.flexbox.FlexWrap.WRAP);
             tagContainer.setFlexDirection(com.google.android.flexbox.FlexDirection.ROW);
             LinearLayout.LayoutParams tagContainerParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            tagContainerParams.topMargin = dpToPx(4);
             tagContainerParams.leftMargin = dpToPx(32);
             tagContainer.setLayoutParams(tagContainerParams);
 
@@ -333,22 +534,68 @@ public class RecommendationActivity extends AppCompatActivity {
                 if (stock == null || stock.isEmpty()) continue;
                 TextView tvTag = new TextView(this);
                 tvTag.setText(stock);
-                tvTag.setTextColor(0xFF1976D2);
-                tvTag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                tvTag.setBackgroundResource(R.drawable.tag_bg_light);
+                tvTag.setTextColor(0xFF1565C0);
+                tvTag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                // 蓝色边框背景
+                android.graphics.drawable.GradientDrawable tagBgDrawable = new android.graphics.drawable.GradientDrawable();
+                tagBgDrawable.setCornerRadius(dpToPx(4));
+                tagBgDrawable.setColor(0xFFE3F2FD);
+                tagBgDrawable.setStroke(dpToPx(1), 0x301565C0);
+                tvTag.setBackground(tagBgDrawable);
                 tvTag.setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3));
                 LinearLayout.LayoutParams tagParams = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-                tagParams.rightMargin = dpToPx(8);
-                tagParams.bottomMargin = dpToPx(6);
+                tagParams.rightMargin = dpToPx(6);
+                tagParams.bottomMargin = dpToPx(5);
                 tvTag.setLayoutParams(tagParams);
+
+                // 点击跳转到同花顺
+                String finalStock = stock;
+                tvTag.setOnClickListener(v -> {
+                    String stockCode = StockAppHelper.extractStockCode(finalStock);
+                    StockAppHelper.openInTongHuaShun(this, stockCode, finalStock);
+                });
+
                 tagContainer.addView(tvTag);
             }
 
             card.addView(tagContainer);
         }
 
+        // 如果有股票代码但没有关联个股，整个卡片也可以点击跳转
+        if (hasStockCode && (item.getRelatedStocks() == null || item.getRelatedStocks().isEmpty())) {
+            card.setClickable(true);
+            card.setFocusable(true);
+            // 添加按压水波纹效果
+            TypedValue outValue = new TypedValue();
+            getTheme().resolveAttribute(android.R.attr.selectableItemBackground, outValue, true);
+            card.setForeground(getResources().getDrawable(outValue.resourceId, getTheme()));
+            card.setOnClickListener(v -> StockAppHelper.openInTongHuaShun(this, item.getCode(), item.getName()));
+        }
+
         return card;
+    }
+
+    /**
+     * 创建信息 Chip 标签（用于情绪/主线/风险等）
+     */
+    private TextView createInfoChip(String text, int textColor, int bgColor) {
+        TextView chip = new TextView(this);
+        chip.setText(text);
+        chip.setTextColor(textColor);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        chip.setTypeface(null, Typeface.BOLD);
+        android.graphics.drawable.GradientDrawable chipBg = new android.graphics.drawable.GradientDrawable();
+        chipBg.setCornerRadius(dpToPx(6));
+        chipBg.setColor(bgColor);
+        chip.setBackground(chipBg);
+        chip.setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4));
+        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        chipParams.rightMargin = dpToPx(8);
+        chipParams.bottomMargin = dpToPx(4);
+        chip.setLayoutParams(chipParams);
+        return chip;
     }
 
     private int dpToPx(int dp) {

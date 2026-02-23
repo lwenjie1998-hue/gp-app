@@ -40,6 +40,7 @@ import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.service.StockDataService;
 import com.gp.stockapp.service.AIRecommendationService;
+import com.gp.stockapp.utils.StockAppHelper;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -644,6 +645,17 @@ public class MainActivity extends AppCompatActivity {
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             tvTitle.setLayoutParams(nameParams);
             itemLayout.addView(tvTitle);
+            
+            // 如果是股票推荐（有代码），添加点击事件
+            final StrategyRecommendation.RecommendItem finalItem = item;
+            if (item.getCode() != null && !item.getCode().isEmpty() && item.getCode().matches("\\d{6}")) {
+                itemLayout.setClickable(true);
+                itemLayout.setOnClickListener(v -> {
+                    StockAppHelper.openInTongHuaShun(this, finalItem.getCode(), finalItem.getName());
+                });
+                // 添加点击效果
+                itemLayout.setBackgroundResource(android.R.drawable.list_selector_background);
+            }
 
             // 右侧推荐理由标签
             String reasonText = getReasonTag(item);

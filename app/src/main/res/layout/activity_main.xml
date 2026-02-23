@@ -38,8 +38,8 @@
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_gradient"
                 android:orientation="vertical"
-                android:paddingHorizontal="16dp"
-                android:paddingBottom="16dp">
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="12dp">
 
                 <!-- 上证指数（主卡片） -->
                 <LinearLayout
@@ -48,8 +48,8 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/card_transparent"
                     android:orientation="vertical"
-                    android:padding="12dp"
-                    android:layout_marginBottom="8dp">
+                    android:padding="10dp"
+                    android:layout_marginBottom="6dp">
 
                     <TextView
                         android:id="@+id/tv_sh_name"
@@ -57,14 +57,14 @@
                         android:layout_height="wrap_content"
                         android:text="上证指数"
                         android:textColor="#B0FFFFFF"
-                        android:textSize="14sp" />
+                        android:textSize="12sp" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginTop="4dp">
+                        android:layout_marginTop="2dp">
 
                         <TextView
                             android:id="@+id/tv_sh_point"
@@ -73,7 +73,7 @@
                             android:layout_weight="1"
                             android:text="--"
                             android:textColor="@color/white"
-                            android:textSize="36sp"
+                            android:textSize="28sp"
                             android:textStyle="bold" />
 
                         <LinearLayout
@@ -88,7 +88,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="18sp"
+                                android:textSize="14sp"
                                 android:textStyle="bold" />
 
                             <TextView
@@ -97,7 +97,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="14sp" />
+                                android:textSize="12sp" />
                         </LinearLayout>
                     </LinearLayout>
 
@@ -105,7 +105,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginTop="8dp">
+                        android:layout_marginTop="4dp">
 
                         <TextView
                             android:id="@+id/tv_sh_volume"
@@ -114,7 +114,7 @@
                             android:layout_weight="1"
                             android:text="成交额: --"
                             android:textColor="#80FFFFFF"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <TextView
                             android:id="@+id/tv_sh_range"
@@ -122,7 +122,7 @@
                             android:layout_height="wrap_content"
                             android:text="振幅: --"
                             android:textColor="#80FFFFFF"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -140,8 +140,8 @@
                         android:layout_weight="1"
                         android:background="@drawable/card_transparent"
                         android:orientation="vertical"
-                        android:padding="10dp"
-                        android:layout_marginEnd="6dp">
+                        android:padding="8dp"
+                        android:layout_marginEnd="4dp">
 
                         <TextView
                             android:id="@+id/tv_sz_name"
@@ -149,7 +149,7 @@
                             android:layout_height="wrap_content"
                             android:text="深证成指"
                             android:textColor="#B0FFFFFF"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <TextView
                             android:id="@+id/tv_sz_point"
@@ -157,15 +157,15 @@
                             android:layout_height="wrap_content"
                             android:text="--"
                             android:textColor="@color/white"
-                            android:textSize="20sp"
+                            android:textSize="16sp"
                             android:textStyle="bold"
-                            android:layout_marginTop="4dp" />
+                            android:layout_marginTop="2dp" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="horizontal"
-                            android:layout_marginTop="4dp">
+                            android:layout_marginTop="2dp">
 
                             <TextView
                                 android:id="@+id/tv_sz_change"
@@ -174,7 +174,7 @@
                                 android:layout_weight="1"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="13sp" />
+                                android:textSize="11sp" />
 
                             <TextView
                                 android:id="@+id/tv_sz_percent"
@@ -182,7 +182,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="13sp" />
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <TextView
@@ -191,8 +191,8 @@
                             android:layout_height="wrap_content"
                             android:text="成交额: --"
                             android:textColor="#80FFFFFF"
-                            android:textSize="11sp"
-                            android:layout_marginTop="4dp" />
+                            android:textSize="10sp"
+                            android:layout_marginTop="2dp" />
                     </LinearLayout>
 
                     <!-- 创业板指 -->
@@ -203,8 +203,8 @@
                         android:layout_weight="1"
                         android:background="@drawable/card_transparent"
                         android:orientation="vertical"
-                        android:padding="10dp"
-                        android:layout_marginStart="6dp">
+                        android:padding="8dp"
+                        android:layout_marginStart="4dp">
 
                         <TextView
                             android:id="@+id/tv_cy_name"
@@ -212,7 +212,7 @@
                             android:layout_height="wrap_content"
                             android:text="创业板指"
                             android:textColor="#B0FFFFFF"
-                            android:textSize="12sp" />
+                            android:textSize="11sp" />
 
                         <TextView
                             android:id="@+id/tv_cy_point"
@@ -220,15 +220,15 @@
                             android:layout_height="wrap_content"
                             android:text="--"
                             android:textColor="@color/white"
-                            android:textSize="20sp"
+                            android:textSize="16sp"
                             android:textStyle="bold"
-                            android:layout_marginTop="4dp" />
+                            android:layout_marginTop="2dp" />
 
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="horizontal"
-                            android:layout_marginTop="4dp">
+                            android:layout_marginTop="2dp">
 
                             <TextView
                                 android:id="@+id/tv_cy_change"
@@ -237,7 +237,7 @@
                                 android:layout_weight="1"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="13sp" />
+                                android:textSize="11sp" />
 
                             <TextView
                                 android:id="@+id/tv_cy_percent"
@@ -245,7 +245,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#FFFFAB91"
-                                android:textSize="13sp" />
+                                android:textSize="11sp" />
                         </LinearLayout>
 
                         <TextView
@@ -254,8 +254,8 @@
                             android:layout_height="wrap_content"
                             android:text="成交额: --"
                             android:textColor="#80FFFFFF"
-                            android:textSize="11sp"
-                            android:layout_marginTop="4dp" />
+                            android:textSize="10sp"
+                            android:layout_marginTop="2dp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -281,12 +281,12 @@
                     <Button
                         android:id="@+id/btn_start_service"
                         android:layout_width="wrap_content"
-                        android:layout_height="44dp"
+                        android:layout_height="36dp"
                         android:text="开始监控"
                         android:textColor="@color/white"
-                        android:textSize="14sp"
+                        android:textSize="12sp"
                         android:background="@drawable/btn_primary"
-                        android:paddingHorizontal="24dp"
+                        android:paddingHorizontal="16dp"
                         android:layout_marginEnd="12dp"
                         android:stateListAnimator="@null" />
 
@@ -320,17 +320,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@drawable/card_elevated"
-                    android:elevation="4dp"
+                    android:elevation="2dp"
                     android:orientation="vertical"
-                    android:padding="20dp"
-                    android:layout_marginBottom="16dp">
+                    android:padding="12dp"
+                    android:layout_marginBottom="12dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="8dp">
 
                         <TextView
                             android:layout_width="0dp"
@@ -338,7 +338,7 @@
                             android:layout_weight="1"
                             android:text="🤖 AI大盘分析"
                             android:textColor="#1A237E"
-                            android:textSize="16sp"
+                            android:textSize="14sp"
                             android:textStyle="bold" />
 
                         <TextView
@@ -347,7 +347,7 @@
                             android:layout_height="wrap_content"
                             android:text=""
                             android:textColor="#999999"
-                            android:textSize="11sp" />
+                            android:textSize="10sp" />
                     </LinearLayout>
 
                     <!-- 三指标行 -->
@@ -355,7 +355,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="8dp">
 
                         <!-- 情绪 -->
                         <LinearLayout
@@ -370,7 +370,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="市场情绪"
                                 android:textColor="#999999"
-                                android:textSize="11sp" />
+                                android:textSize="10sp" />
 
                             <TextView
                                 android:id="@+id/tv_sentiment"
@@ -378,9 +378,9 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#333333"
-                                android:textSize="15sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold"
-                                android:layout_marginTop="4dp" />
+                                android:layout_marginTop="2dp" />
                         </LinearLayout>
 
                         <View
@@ -401,7 +401,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="趋势方向"
                                 android:textColor="#999999"
-                                android:textSize="11sp" />
+                                android:textSize="10sp" />
 
                             <TextView
                                 android:id="@+id/tv_trend"
@@ -409,9 +409,9 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#333333"
-                                android:textSize="15sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold"
-                                android:layout_marginTop="4dp" />
+                                android:layout_marginTop="2dp" />
                         </LinearLayout>
 
                         <View
@@ -432,7 +432,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="风险等级"
                                 android:textColor="#999999"
-                                android:textSize="11sp" />
+                                android:textSize="10sp" />
 
                             <TextView
                                 android:id="@+id/tv_risk"
@@ -440,9 +440,9 @@
                                 android:layout_height="wrap_content"
                                 android:text="--"
                                 android:textColor="#333333"
-                                android:textSize="15sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold"
-                                android:layout_marginTop="4dp" />
+                                android:layout_marginTop="2dp" />
                         </LinearLayout>
                     </LinearLayout>
 
@@ -451,7 +451,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
                         android:background="#F0F0F0"
-                        android:layout_marginBottom="12dp" />
+                        android:layout_marginBottom="8dp" />
 
                     <!-- 操作建议 -->
                     <TextView
@@ -459,8 +459,8 @@
                         android:layout_height="wrap_content"
                         android:text="操作建议"
                         android:textColor="#999999"
-                        android:textSize="11sp"
-                        android:layout_marginBottom="4dp" />
+                        android:textSize="10sp"
+                        android:layout_marginBottom="2dp" />
 
                     <TextView
                         android:id="@+id/tv_suggestion"
@@ -468,9 +468,9 @@
                         android:layout_height="wrap_content"
                         android:text="等待AI分析..."
                         android:textColor="#333333"
-                        android:textSize="14sp"
-                        android:lineSpacingMultiplier="1.4"
-                        android:layout_marginBottom="8dp" />
+                        android:textSize="12sp"
+                        android:lineSpacingMultiplier="1.2"
+                        android:layout_marginBottom="4dp" />
 
                     <!-- 详细分析（可展开） -->
                     <TextView
@@ -479,7 +479,7 @@
                         android:layout_height="wrap_content"
                         android:text="查看详细分析 ▼"
                         android:textColor="#1A73E8"
-                        android:textSize="13sp"
+                        android:textSize="11sp"
                         android:paddingVertical="4dp" />
 
                     <TextView
@@ -488,10 +488,10 @@
                         android:layout_height="wrap_content"
                         android:text=""
                         android:textColor="#555555"
-                        android:textSize="13sp"
-                        android:lineSpacingMultiplier="1.5"
+                        android:textSize="11sp"
+                        android:lineSpacingMultiplier="1.2"
                         android:visibility="gone"
-                        android:layout_marginTop="8dp" />
+                        android:layout_marginTop="4dp" />
                 </LinearLayout>
 
                 <!-- ===== 策略推荐 2x2 网格 ===== -->

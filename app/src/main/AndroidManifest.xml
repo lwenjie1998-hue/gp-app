@@ -15,6 +15,27 @@
     <!-- 通知权限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 查询第三方APP（Android 11+需要） -->
+    <queries>
+        <!-- 同花顺 -->
+        <package android:name="com.hexin.plat.android" />
+        <!-- 东方财富 -->
+        <package android:name="com.eastmoney.android.berlin" />
+        <!-- 允许解析自定义 URL Scheme -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="hexin" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="ths" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="dfcf" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

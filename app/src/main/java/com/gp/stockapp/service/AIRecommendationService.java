@@ -42,7 +42,7 @@ public class AIRecommendationService extends Service {
     private static final String CHANNEL_ID = "AIAnalysisChannel";
     private static final int NOTIFICATION_ID = 2;
     private static final long ANALYSIS_INTERVAL = 300000; // 5分钟分析一次
-    private static final long STRATEGY_INTERVAL = 600000; // 10分钟策略分析一次
+    private static final long STRATEGY_INTERVAL = 300000; // 5分钟策略分析一次
     
     // 手动刷新动作
     public static final String ACTION_FORCE_AUCTION = "com.gp.stockapp.FORCE_AUCTION";
@@ -672,6 +672,7 @@ public class AIRecommendationService extends Service {
                 "  \"items\": [\n" +
                 "    {\n" +
                 "      \"name\": \"标的名称\",\n" +
+                "      \"code\": \"股票代码(6位数字)\",\n" +
                 "      \"reason\": \"游资视角推荐理由(30字内)\",\n" +
                 "      \"highlight\": \"核心逻辑(如:主线龙头弱转强/题材首板打板/连板缩量加速)\",\n" +
                 "      \"score\": 0-100,\n" +
@@ -713,6 +714,7 @@ public class AIRecommendationService extends Service {
                 "  \"items\": [\n" +
                 "    {\n" +
                 "      \"name\": \"标的名称\",\n" +
+                "      \"code\": \"股票代码(6位数字)\",\n" +
                 "      \"reason\": \"游资视角推荐理由(30字内)\",\n" +
                 "      \"highlight\": \"核心逻辑(如:龙头尾盘低吸/炸板回封/弱转强确认)\",\n" +
                 "      \"score\": 0-100,\n" +
