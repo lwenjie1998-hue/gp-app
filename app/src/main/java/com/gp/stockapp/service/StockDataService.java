@@ -15,7 +15,9 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.gp.stockapp.MainActivity;
 import com.gp.stockapp.api.GLM4Client;
+import com.gp.stockapp.api.HotStockApi;
 import com.gp.stockapp.api.MarketApi;
+import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.gp.stockapp.repository.StockRepository;
@@ -41,8 +43,11 @@ public class StockDataService extends Service {
 
     private StockRepository stockRepository;
     private MarketApi marketApi;
+    private HotStockApi hotStockApi;
     private ExecutorService executorService;
     private Timer fetchTimer;
+    private long lastHotDataFetchTime = 0;
+    private static final long HOT_DATA_FETCH_INTERVAL = 300000; // 热门数据5分钟抓取一次
     private boolean isRunning = false;
 
     @Override
@@ -52,6 +57,7 @@ public class StockDataService extends Service {
 
         stockRepository = StockRepository.getInstance(getApplicationContext());
         marketApi = MarketApi.getInstance();
+        hotStockApi = HotStockApi.getInstance();
         executorService = Executors.newFixedThreadPool(2);
 
         createNotificationChannel();
@@ -180,6 +186,25 @@ public class StockDataService extends Service {
                     Log.d(TAG, "成功更新市场要闻: 抓取并保存了 " + newsList.size() + " 条新闻");
                 } else {
                     Log.w(TAG, "市场要闻抓取结果为空（可能所有源都失败了）");
+                }
+
+                // 抓取热门股票数据（龙虎榜、涨停板、连板股、涨幅榜）
+                // 每5分钟抓取一次，避免频繁请求
+                long now = System.currentTimeMillis();
+                if (now - lastHotDataFetchTime >= HOT_DATA_FETCH_INTERVAL) {
+                    Log.d(TAG, "正在抓取热门股票数据（龙虎榜/涨停板/连板/涨幅榜）...");
+                    try {
+                        String dateStr = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.CHINA)
+                                .format(new java.util.Date());
+                        HotStockData hotData = hotStockApi.fetchAllHotData(dateStr);
+                        if (hotData != null) {
+                            stockRepository.saveHotStockData(hotData);
+                            lastHotDataFetchTime = now;
+                            Log.d(TAG, "成功更新热门股票数据");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "抓取热门股票数据失败", e);
+                    }
                 }
 
                 Log.d(TAG, "==== 定时数据抓取任务完成 ====");

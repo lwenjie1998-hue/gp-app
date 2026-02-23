@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketAnalysis;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
@@ -38,6 +39,7 @@ public class StockRepository {
     private static final String KEY_SECTOR_RECOMMENDATION = "sector_recommendation";
     private static final String KEY_AUCTION_RECOMMENDATION = "auction_recommendation";
     private static final String KEY_CLOSING_RECOMMENDATION = "closing_recommendation";
+    private static final String KEY_HOT_STOCK_DATA = "hot_stock_data";
 
     private SharedPreferences preferences;
     private Gson gson;
@@ -274,6 +276,33 @@ public class StockRepository {
             return gson.fromJson(json, StrategyRecommendation.class);
         } catch (Exception e) {
             Log.e(TAG, "Error parsing closing recommendation", e);
+            return null;
+        }
+    }
+
+    // ===== 热门股票数据管理 =====
+
+    /**
+     * 保存热门股票数据（龙虎榜、涨停板等）
+     */
+    public void saveHotStockData(HotStockData data) {
+        executorService.execute(() -> {
+            String json = gson.toJson(data);
+            preferences.edit().putString(KEY_HOT_STOCK_DATA, json).apply();
+            Log.d(TAG, "Saved hot stock data");
+        });
+    }
+
+    /**
+     * 获取热门股票数据
+     */
+    public HotStockData getHotStockData() {
+        String json = preferences.getString(KEY_HOT_STOCK_DATA, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, HotStockData.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing hot stock data", e);
             return null;
         }
     }

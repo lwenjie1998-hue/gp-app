@@ -375,12 +375,14 @@ public class RecommendationActivity extends AppCompatActivity {
         if (hasStockCode) {
             TextView tvCode = new TextView(this);
             tvCode.setText(item.getCode());
-            tvCode.setTextColor(0xFF9E9E9E);
+            tvCode.setTextColor(0xFF1565C0);  // 改为蓝色表示可点击
             tvCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             codeParams.leftMargin = dpToPx(6);
             tvCode.setLayoutParams(codeParams);
+            // 点击股票代码也可以跳转到同花顺
+            tvCode.setOnClickListener(v -> StockAppHelper.openInTongHuaShun(this, item.getCode(), item.getName()));
             row1.addView(tvCode);
         }
 
