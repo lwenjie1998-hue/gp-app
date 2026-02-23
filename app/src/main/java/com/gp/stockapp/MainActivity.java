@@ -460,6 +460,12 @@ public class MainActivity extends AppCompatActivity {
             tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             tvTitle.setMaxLines(1);
             tvTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            
+            // 重大新闻高亮显示
+            if (news.isHighImpact()) {
+                tvTitle.setTextColor(0xFFFF8A80); // 浅红色高亮
+                tvTitle.setTypeface(null, Typeface.BOLD);
+            }
             itemLayout.addView(tvTitle);
 
             layoutNewsItems.addView(itemLayout);

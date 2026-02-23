@@ -16,6 +16,7 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -230,15 +231,18 @@ public class MarketApi {
 
         // 去重（按标题）并按时间降序排序
         List<StockNews> uniqueNews = deduplicateNews(allNews);
-        uniqueNews.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
+        
+        // 过滤个股新闻，只保留影响大盘的宏观/政策/国际新闻
+        List<StockNews> filteredNews = filterMarketWideNews(uniqueNews);
+        filteredNews.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
 
         // 限制返回数量
-        if (uniqueNews.size() > limit) {
-            uniqueNews = uniqueNews.subList(0, limit);
+        if (filteredNews.size() > limit) {
+            filteredNews = filteredNews.subList(0, limit);
         }
 
-        Log.d(TAG, "Total unique news: " + uniqueNews.size());
-        return uniqueNews;
+        Log.d(TAG, "Total filtered market-wide news: " + filteredNews.size() + " (before filter: " + uniqueNews.size() + ")");
+        return filteredNews;
     }
 
     /**
@@ -588,6 +592,133 @@ public class MarketApi {
         String s1 = title1.length() > 20 ? title1.substring(0, 20) : title1;
         String s2 = title2.length() > 20 ? title2.substring(0, 20) : title2;
         return s1.equals(s2);
+    }
+
+    // ===== 新闻过滤：只保留影响大盘的宏观新闻 =====
+
+    // 个股新闻关键词（排除）
+    private static final String[] INDIVIDUAL_STOCK_KEYWORDS = {
+            "涨停", "跌停", "龙虎榜", "大宗交易",
+            "年报", "季报", "半年报", "业绩预告", "业绩快报",
+            "公告", "增持", "减持", "回购", "质押",
+            "定增", "配股", "分红", "送转", "除权", "除息",
+            "股东大会", "董事会", "监事会",
+            "解禁", "限售股", "实控人", "控股股东",
+            "研报", "评级", "目标价",
+            "收购", "并购", "重组", "借壳", "上市申请",
+            "IPO申购", "中签", "新股发行"
+    };
+
+    // 宏观/大盘新闻关键词（保留）
+    private static final String[] MARKET_WIDE_KEYWORDS = {
+            // 宏观政策
+            "央行", "货币政策", "降准", "降息", "加息", "MLF", "LPR", "逆回购",
+            "国务院", "证监会", "银保监", "财政部", "发改委", "商务部",
+            "政策", "监管", "法规", "改革",
+            // 大盘相关
+            "大盘", "A股", "股市", "沪深", "沪指", "深指", "创业板",
+            "上证", "深证", "北证", "科创板",
+            "三大指数", "两市", "成交额", "成交量",
+            "牛市", "熊市", "震荡", "反弹", "回调",
+            "放量", "缩量", "突破", "支撑", "压力",
+            // 板块/行业整体
+            "板块", "行业", "赛道", "概念股", "题材",
+            "半导体行业", "新能源行业", "人工智能行业",
+            // 资金面
+            "北向资金", "外资", "融资融券", "杠杆资金",
+            "公募基金", "私募基金", "社保基金", "险资",
+            "资金流入", "资金流出", "净流入", "净流出",
+            // 国际
+            "美联储", "美股", "纳斯达克", "道琼斯", "标普",
+            "港股", "恒生", "日经", "欧股",
+            "美元", "人民币", "汇率",
+            "关税", "贸易战", "贸易摩擦", "制裁",
+            "原油", "黄金", "大宗商品",
+            "地缘", "战争", "冲突",
+            // 宏观经济数据
+            "GDP", "CPI", "PPI", "PMI", "社融",
+            "就业", "失业率", "通胀", "通缩",
+            "进出口", "贸易数据", "外贸",
+            "房地产", "楼市",
+            // 重大事件
+            "两会", "中央经济工作会议", "政治局会议",
+            "达沃斯", "G20", "APEC"
+    };
+
+    // 个股代码正则（6位数字代码如 600519、000858、300750）
+    private static final Pattern STOCK_CODE_PATTERN = Pattern.compile(
+            "\\b[036]\\d{5}\\b|\\(\\d{6}\\)|（\\d{6}）|SH\\d{6}|SZ\\d{6}|sh\\d{6}|sz\\d{6}"
+    );
+
+    /**
+     * 过滤新闻，只保留影响大盘的宏观/政策/国际新闻
+     * 过滤逻辑：
+     * 1. 标题含宏观关键词 → 保留
+     * 2. 标题含个股代码/个股关键词且不含宏观关键词 → 排除
+     * 3. 其他 → 保留（默认新闻源已经是财经要闻频道）
+     */
+    private List<StockNews> filterMarketWideNews(List<StockNews> newsList) {
+        List<StockNews> filtered = new ArrayList<>();
+        for (StockNews news : newsList) {
+            if (isMarketWideNews(news)) {
+                filtered.add(news);
+            } else {
+                Log.d(TAG, "过滤个股新闻: " + news.getTitle());
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * 判断是否为影响大盘的宏观类新闻
+     */
+    private boolean isMarketWideNews(StockNews news) {
+        String title = news.getTitle();
+        String summary = news.getSummary();
+        if (title == null) return false;
+
+        String combined = title + (summary != null ? summary : "");
+
+        // 1. 检查是否包含宏观关键词（优先保留）
+        boolean hasMarketKeyword = false;
+        for (String keyword : MARKET_WIDE_KEYWORDS) {
+            if (combined.contains(keyword)) {
+                hasMarketKeyword = true;
+                break;
+            }
+        }
+
+        // 2. 检查是否包含个股代码
+        boolean hasStockCode = STOCK_CODE_PATTERN.matcher(combined).find();
+
+        // 3. 检查是否包含个股关键词
+        boolean hasIndividualKeyword = false;
+        for (String keyword : INDIVIDUAL_STOCK_KEYWORDS) {
+            if (title.contains(keyword)) {
+                hasIndividualKeyword = true;
+                break;
+            }
+        }
+
+        // 判断逻辑：
+        // - 有宏观关键词：保留（即使提到个股代码，如"央行降准利好银行板块"）
+        // - 有个股代码+个股关键词，无宏观关键词：排除
+        // - 全球财经类型的新闻：保留
+        if (hasMarketKeyword) {
+            return true;
+        }
+        if (hasStockCode && hasIndividualKeyword) {
+            return false;
+        }
+        if (hasIndividualKeyword && !hasMarketKeyword) {
+            return false;
+        }
+        // 全球财经新闻默认保留
+        if ("全球财经".equals(news.getNewsType())) {
+            return true;
+        }
+        // 其余新闻保留（新闻源本身就是财经要闻频道）
+        return true;
     }
 
     // ===== 工具方法 =====

@@ -40,6 +40,9 @@ public class StockNews {
     @SerializedName("impact_level")
     private String impactLevel; // high, medium, low
     
+    @SerializedName("recommended_stocks")
+    private String recommendedStocks; // AI推荐的相关A股股票，如"贵州茅台(600519)、五粮液(000858)"
+    
     // Getters and Setters
     public String getNewsId() { return newsId; }
     public void setNewsId(String newsId) { this.newsId = newsId; }
@@ -73,6 +76,13 @@ public class StockNews {
     
     public String getImpactLevel() { return impactLevel; }
     public void setImpactLevel(String impactLevel) { this.impactLevel = impactLevel; }
+    
+    public String getRecommendedStocks() { return recommendedStocks; }
+    public void setRecommendedStocks(String recommendedStocks) { this.recommendedStocks = recommendedStocks; }
+    
+    public boolean hasRecommendedStocks() {
+        return recommendedStocks != null && !recommendedStocks.trim().isEmpty();
+    }
     
     /**
      * 判断是否是高影响力新闻

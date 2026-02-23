@@ -524,11 +524,11 @@
                             android:layout_marginBottom="10dp">
 
                             <TextView
-                                android:layout_width="26dp"
-                                android:layout_height="26dp"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
                                 android:background="@drawable/circle_icon_bg_light"
                                 android:text="📰"
-                                android:textSize="13sp"
+                                android:textSize="11sp"
                                 android:gravity="center" />
 
                             <TextView
@@ -536,7 +536,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="市场要闻"
                                 android:textColor="@color/white"
-                                android:textSize="14sp"
+                                android:textSize="12sp"
                                 android:textStyle="bold"
                                 android:layout_marginStart="6dp" />
 
@@ -594,11 +594,11 @@
                             android:layout_marginBottom="10dp">
 
                             <TextView
-                                android:layout_width="26dp"
-                                android:layout_height="26dp"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
                                 android:background="@drawable/circle_icon_bg"
                                 android:text="🔥"
-                                android:textSize="13sp"
+                                android:textSize="11sp"
                                 android:gravity="center" />
 
                             <TextView
@@ -606,7 +606,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="板块推荐"
                                 android:textColor="@color/white"
-                                android:textSize="14sp"
+                                android:textSize="12sp"
                                 android:textStyle="bold"
                                 android:layout_marginStart="6dp" />
 
@@ -672,11 +672,11 @@
                             android:layout_marginBottom="10dp">
 
                             <TextView
-                                android:layout_width="26dp"
-                                android:layout_height="26dp"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
                                 android:background="@drawable/circle_icon_bg"
                                 android:text="⚡"
-                                android:textSize="13sp"
+                                android:textSize="11sp"
                                 android:gravity="center" />
 
                             <TextView
@@ -684,7 +684,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="竞价推荐"
                                 android:textColor="@color/white"
-                                android:textSize="14sp"
+                                android:textSize="12sp"
                                 android:textStyle="bold"
                                 android:layout_marginStart="6dp" />
 
@@ -742,11 +742,11 @@
                             android:layout_marginBottom="10dp">
 
                             <TextView
-                                android:layout_width="26dp"
-                                android:layout_height="26dp"
+                                android:layout_width="20dp"
+                                android:layout_height="20dp"
                                 android:background="@drawable/circle_icon_bg"
                                 android:text="🌙"
-                                android:textSize="13sp"
+                                android:textSize="11sp"
                                 android:gravity="center" />
 
                             <TextView
@@ -754,7 +754,7 @@
                                 android:layout_height="wrap_content"
                                 android:text="尾盘推荐"
                                 android:textColor="@color/white"
-                                android:textSize="14sp"
+                                android:textSize="12sp"
                                 android:textStyle="bold"
                                 android:layout_marginStart="6dp" />
 

@@ -14,10 +14,14 @@ import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.gp.stockapp.MainActivity;
+import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.api.MarketApi;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.gp.stockapp.repository.StockRepository;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.List;
 import java.util.Timer;
@@ -170,6 +174,8 @@ public class StockDataService extends Service {
                 Log.d(TAG, "正在抓取市场要闻...");
                 List<StockNews> newsList = marketApi.fetchMarketNews();
                 if (newsList != null && !newsList.isEmpty()) {
+                    // 用AI为重大新闻推荐相关A股股票
+                    enrichNewsWithStockRecommendations(newsList);
                     stockRepository.saveNewsData(newsList);
                     Log.d(TAG, "成功更新市场要闻: 抓取并保存了 " + newsList.size() + " 条新闻");
                 } else {
@@ -181,6 +187,114 @@ public class StockDataService extends Service {
                 Log.e(TAG, "定时抓取大盘数据时发生严重错误", e);
             }
         });
+    }
+
+    /**
+     * 用AI为重大新闻推荐相关A股股票
+     * 将所有新闻标题批量发送给GLM-4，由AI判断哪些是重大新闻并推荐相关股票
+     */
+    private void enrichNewsWithStockRecommendations(List<StockNews> newsList) {
+        GLM4Client glm4Client = GLM4Client.getInstance();
+        if (glm4Client == null) {
+            Log.w(TAG, "GLM4Client未初始化，跳过新闻股票推荐");
+            return;
+        }
+
+        try {
+            // 构建新闻列表prompt
+            StringBuilder newsText = new StringBuilder();
+            for (int i = 0; i < newsList.size(); i++) {
+                StockNews news = newsList.get(i);
+                newsText.append(i + 1).append(". ")
+                        .append(news.getTitle());
+                if (news.getSummary() != null && !news.getSummary().isEmpty()) {
+                    String summary = news.getSummary().length() > 80 
+                            ? news.getSummary().substring(0, 80) + "..." 
+                            : news.getSummary();
+                    newsText.append(" — ").append(summary);
+                }
+                newsText.append("\n");
+            }
+
+            String prompt = "你是一位专业的A股投资分析师。以下是最新的财经新闻列表：\n\n" +
+                    newsText.toString() +
+                    "\n请分析以上新闻，找出对A股市场有重大影响的新闻（如政策变化、国际事件、行业重大变动等），" +
+                    "并为这些重大新闻推荐最直接受益或受影响的A股股票（1-3只）。\n\n" +
+                    "请严格按以下JSON格式返回：\n" +
+                    "{\n" +
+                    "  \"recommendations\": [\n" +
+                    "    {\n" +
+                    "      \"news_index\": 1,\n" +
+                    "      \"stocks\": \"股票名称(代码)、股票名称(代码)\",\n" +
+                    "      \"importance\": 4\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}\n\n" +
+                    "说明：\n" +
+                    "- news_index: 新闻编号（从1开始）\n" +
+                    "- stocks: 推荐的A股股票，格式如\"贵州茅台(600519)、宁德时代(300750)\"\n" +
+                    "- importance: 重要程度1-5（5最重要）\n" +
+                    "- 只返回有重大影响的新闻，普通新闻不需要返回\n" +
+                    "- 推荐的股票必须是A股上市公司，确保代码准确\n" +
+                    "- 只返回JSON，不要其他文字";
+
+            Log.d(TAG, "正在用AI分析新闻并推荐相关股票...");
+            String response = glm4Client.analyze(prompt);
+
+            if (response != null && !response.isEmpty()) {
+                parseAndApplyRecommendations(response, newsList);
+            } else {
+                Log.w(TAG, "AI新闻分析返回为空");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "AI新闻股票推荐出错", e);
+        }
+    }
+
+    /**
+     * 解析AI返回的推荐结果并应用到对应新闻
+     */
+    private void parseAndApplyRecommendations(String response, List<StockNews> newsList) {
+        try {
+            // 提取JSON部分
+            String jsonStr = response;
+            int jsonStart = response.indexOf("{");
+            int jsonEnd = response.lastIndexOf("}");
+            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                jsonStr = response.substring(jsonStart, jsonEnd + 1);
+            }
+
+            JSONObject json = new JSONObject(jsonStr);
+            JSONArray recommendations = json.optJSONArray("recommendations");
+            if (recommendations == null) {
+                Log.w(TAG, "AI返回中没有recommendations字段");
+                return;
+            }
+
+            int appliedCount = 0;
+            for (int i = 0; i < recommendations.length(); i++) {
+                JSONObject rec = recommendations.getJSONObject(i);
+                int newsIndex = rec.optInt("news_index", -1) - 1; // 转为0-based
+                String stocks = rec.optString("stocks", "");
+                int importance = rec.optInt("importance", 3);
+
+                if (newsIndex >= 0 && newsIndex < newsList.size() && !stocks.isEmpty()) {
+                    StockNews news = newsList.get(newsIndex);
+                    news.setRecommendedStocks(stocks);
+                    news.setImportance(importance);
+                    if (importance >= 4) {
+                        news.setImpactLevel("high");
+                    } else if (importance >= 3) {
+                        news.setImpactLevel("medium");
+                    }
+                    appliedCount++;
+                    Log.d(TAG, "新闻[" + (newsIndex + 1) + "] 推荐股票: " + stocks);
+                }
+            }
+            Log.d(TAG, "成功为 " + appliedCount + " 条重大新闻添加了股票推荐");
+        } catch (Exception e) {
+            Log.e(TAG, "解析AI新闻推荐结果出错: " + response, e);
+        }
     }
 
     /**
