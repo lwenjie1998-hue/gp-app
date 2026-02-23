@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- 中心圆形背景装饰 -->
+    <path
+        android:pathData="M54,54m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0"
+        android:fillColor="#15FFFFFF" />
+
+    <!-- 趋势上涨折线 -->
+    <path
+        android:pathData="M30,70 L45,55 L55,65 L78,38"
+        android:strokeColor="@color/white"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+        
+    <!-- 箭头 -->
+    <path
+        android:pathData="M68,38 L78,38 L78,48"
+        android:strokeColor="@color/white"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- "G" 字母部分 -->
+    <path
+        android:pathData="M42,40 C35,40 30,45 30,54 C30,63 35,68 42,68 C47,68 51,65 52,60 L42,60"
+        android:strokeColor="@color/white"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- "P" 字母部分 -->
+    <path
+        android:pathData="M60,68 L60,40 C60,40 72,40 72,50 C72,60 60,60 60,60"
+        android:strokeColor="@color/white"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+</vector>
