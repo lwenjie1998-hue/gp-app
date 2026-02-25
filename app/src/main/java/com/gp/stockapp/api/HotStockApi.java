@@ -55,12 +55,12 @@ public class HotStockApi {
             "?ut=7eea3edcaed734bea9cb99f84f5d01d6&dpt=wz.ztzt&Ession=" +
             "&date=%s&_=";
 
-    // 涨幅榜 - A股涨幅排名（按涨幅降序排列, 取前30）
-    // 排除科创板(688)和北交所(8)
+    // 活跃股 - A股主板活跃股（按成交额降序排列, 取前30）
+    // 仅主板(600xxx/000xxx)，排除创业板(300)、科创板(688)和北交所
     private static final String EASTMONEY_TOP_GAINERS_API =
             "https://push2.eastmoney.com/api/qt/clist/get" +
             "?pn=1&pz=30&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281" +
-            "&fltt=2&invt=2&fid=f3&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23" +
+            "&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:1+t:2" +
             "&fields=f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21" +
             "&_=";
 
@@ -180,9 +180,12 @@ public class HotStockApi {
                     lhb.setReason(getJsonString(item, "EXPLANATION"));
                     lhb.setMarketCap(getJsonDouble(item, "FREE_MARKET_CAP") / 100000000.0); // 元->亿
 
-                    // 过滤科创板和北交所
+                    // 仅保留主板(600xxx/000xxx)，过滤创业板/科创板/北交所，且涨幅<9%
                     String code = lhb.getCode();
-                    if (code != null && !code.startsWith("688") && !code.startsWith("8") && !code.startsWith("4")) {
+                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                            || code.startsWith("603") || code.startsWith("605") 
+                            || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))
+                            && lhb.getChangePercent() < 9.0) {
                         result.add(lhb);
                     }
                 } catch (Exception e) {
@@ -260,8 +263,10 @@ public class HotStockApi {
                     // 所属概念
                     lu.setConcept(getJsonString(item, "hybk"));
 
-                    // 过滤科创板和北交所
-                    if (code != null && !code.startsWith("688") && !code.startsWith("8") && !code.startsWith("4")) {
+                    // 仅保留主板(600xxx/000xxx)，过滤创业板/科创板/北交所
+                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                            || code.startsWith("603") || code.startsWith("605") 
+                            || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))) {
                         result.add(lu);
                     }
                 } catch (Exception e) {
@@ -313,7 +318,9 @@ public class HotStockApi {
                     cl.setMarketCap(getJsonDouble(item, "ltsz") / 100000000.0);
                     cl.setConcept(getJsonString(item, "hybk"));
 
-                    if (code != null && !code.startsWith("688") && !code.startsWith("8") && !code.startsWith("4")) {
+                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                            || code.startsWith("603") || code.startsWith("605") 
+                            || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))) {
                         result.add(cl);
                     }
                 } catch (Exception e) {
@@ -328,7 +335,7 @@ public class HotStockApi {
     }
 
     /**
-     * 抓取涨幅榜TOP30（沪深A股，排除科创北交所）
+     * 抓取主板活跃股TOP30（按成交额排序，仅600xxx/000xxx主板）
      */
     private List<HotStockData.TopGainerItem> fetchTopGainers() throws IOException {
         List<HotStockData.TopGainerItem> result = new ArrayList<>();
@@ -365,10 +372,12 @@ public class HotStockApi {
                     gainer.setAmount(getJsonDouble(item, "f6") / 10000.0); // 成交额 元->万
                     gainer.setMarketCap(getJsonDouble(item, "f21") / 100000000.0); // 流通市值 元->亿
 
-                    // 过滤科创板和北交所，过滤ST
+                    // 仅保留主板(600xxx/000xxx)，过滤创业板/科创板/北交所/ST，且涨幅<9%
                     String name = gainer.getName();
-                    if (code != null && !code.startsWith("688") && !code.startsWith("8") && !code.startsWith("4")
-                            && name != null && !name.contains("ST")) {
+                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                            || code.startsWith("603") || code.startsWith("605") || code.startsWith("000"))
+                            && name != null && !name.contains("ST")
+                            && gainer.getChangePercent() < 9.0) {
                         result.add(gainer);
                     }
                 } catch (Exception e) {

@@ -40,6 +40,7 @@ public class StockRepository {
     private static final String KEY_AUCTION_RECOMMENDATION = "auction_recommendation";
     private static final String KEY_CLOSING_RECOMMENDATION = "closing_recommendation";
     private static final String KEY_HOT_STOCK_DATA = "hot_stock_data";
+    private static final String KEY_PREV_DAY_HOT_STOCK_DATA = "prev_day_hot_stock_data";
 
     private SharedPreferences preferences;
     private Gson gson;
@@ -294,7 +295,18 @@ public class StockRepository {
     }
 
     /**
-     * 获取热门股票数据
+     * 保存前一个交易日的热门股票数据（竞价策略专用）
+     */
+    public void savePrevDayHotStockData(HotStockData data) {
+        executorService.execute(() -> {
+            String json = gson.toJson(data);
+            preferences.edit().putString(KEY_PREV_DAY_HOT_STOCK_DATA, json).apply();
+            Log.d(TAG, "Saved previous day hot stock data");
+        });
+    }
+
+    /**
+     * 获取热门股票数据（当天）
      */
     public HotStockData getHotStockData() {
         String json = preferences.getString(KEY_HOT_STOCK_DATA, null);
@@ -307,16 +319,71 @@ public class StockRepository {
         }
     }
 
+    /**
+     * 获取前一个交易日的热门股票数据（竞价策略专用）
+     */
+    public HotStockData getPrevDayHotStockData() {
+        String json = preferences.getString(KEY_PREV_DAY_HOT_STOCK_DATA, null);
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return gson.fromJson(json, HotStockData.class);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing prev day hot stock data", e);
+            return null;
+        }
+    }
+
     // ===== 新闻数据管理 =====
 
     /**
-     * 保存新闻数据
+     * 保存新闻数据（直接覆盖）
      */
     public void saveNewsData(List<StockNews> newsList) {
         executorService.execute(() -> {
             String json = gson.toJson(newsList);
             preferences.edit().putString(KEY_NEWS, json).apply();
             Log.d(TAG, "Saved " + newsList.size() + " news records");
+        });
+    }
+
+    /**
+     * 合并保存新闻数据
+     * 新获取的新闻放在最前面，与已有新闻合并去重，只保留指定条数
+     * @param newNewsList 新获取的新闻列表
+     * @param maxCount 最大保留条数
+     */
+    public void mergeAndSaveNews(List<StockNews> newNewsList, int maxCount) {
+        executorService.execute(() -> {
+            // 获取已有新闻
+            List<StockNews> existingNews = getAllNews();
+            
+            // 合并：新的在前
+            List<StockNews> merged = new ArrayList<>(newNewsList);
+            
+            // 添加旧新闻（去重，按标题判断）
+            java.util.Set<String> newTitles = new java.util.HashSet<>();
+            for (StockNews news : newNewsList) {
+                if (news.getTitle() != null) {
+                    newTitles.add(news.getTitle().trim());
+                }
+            }
+            for (StockNews oldNews : existingNews) {
+                if (oldNews.getTitle() != null && !newTitles.contains(oldNews.getTitle().trim())) {
+                    merged.add(oldNews);
+                }
+            }
+            
+            // 按发布时间降序排序（最新的在前）
+            merged.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
+            
+            // 只保留 maxCount 条
+            if (merged.size() > maxCount) {
+                merged = new ArrayList<>(merged.subList(0, maxCount));
+            }
+            
+            String json = gson.toJson(merged);
+            preferences.edit().putString(KEY_NEWS, json).apply();
+            Log.d(TAG, "Merged and saved " + merged.size() + " news records (new: " + newNewsList.size() + ", existing: " + existingNews.size() + ")");
         });
     }
 

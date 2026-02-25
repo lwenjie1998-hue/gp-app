@@ -391,25 +391,6 @@ public class RecommendationActivity extends AppCompatActivity {
         spacer.setLayoutParams(new LinearLayout.LayoutParams(0, 0, 1f));
         row1.addView(spacer);
 
-        // 亮点标签（highlight）
-        if (item.getHighlight() != null && !item.getHighlight().isEmpty()) {
-            TextView tvHighlight = new TextView(this);
-            tvHighlight.setText(item.getHighlight());
-            tvHighlight.setTextColor(0xFFFFFFFF);
-            tvHighlight.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-            tvHighlight.setTypeface(null, Typeface.BOLD);
-            android.graphics.drawable.GradientDrawable hlBg = new android.graphics.drawable.GradientDrawable();
-            hlBg.setCornerRadius(dpToPx(4));
-            hlBg.setColor(0xFFFF6D00);
-            tvHighlight.setBackground(hlBg);
-            tvHighlight.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
-            LinearLayout.LayoutParams hlParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            hlParams.rightMargin = dpToPx(8);
-            tvHighlight.setLayoutParams(hlParams);
-            row1.addView(tvHighlight);
-        }
-
         // 评分
         if (item.getScore() > 0) {
             TextView tvScore = new TextView(this);
@@ -431,6 +412,43 @@ public class RecommendationActivity extends AppCompatActivity {
         }
 
         card.addView(row1);
+
+        // === 亮点标签（highlight）- 拆分为多个小标签，流式布局 ===
+        if (item.getHighlight() != null && !item.getHighlight().isEmpty()) {
+            com.google.android.flexbox.FlexboxLayout hlFlow = new com.google.android.flexbox.FlexboxLayout(this);
+            hlFlow.setFlexWrap(com.google.android.flexbox.FlexWrap.WRAP);
+            hlFlow.setFlexDirection(com.google.android.flexbox.FlexDirection.ROW);
+            LinearLayout.LayoutParams hlFlowParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            hlFlowParams.topMargin = dpToPx(6);
+            hlFlowParams.leftMargin = dpToPx(32);
+            hlFlow.setLayoutParams(hlFlowParams);
+
+            // 按 "+" 拆分为多个标签
+            String[] hlParts = item.getHighlight().split("\\+");
+            for (String part : hlParts) {
+                String trimmed = part.trim();
+                if (trimmed.isEmpty()) continue;
+                TextView tvHlTag = new TextView(this);
+                tvHlTag.setText(trimmed);
+                tvHlTag.setTextColor(0xFFFFFFFF);
+                tvHlTag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+                tvHlTag.setTypeface(null, Typeface.BOLD);
+                android.graphics.drawable.GradientDrawable hlBg = new android.graphics.drawable.GradientDrawable();
+                hlBg.setCornerRadius(dpToPx(4));
+                hlBg.setColor(0xFFFF6D00);
+                tvHlTag.setBackground(hlBg);
+                tvHlTag.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+                LinearLayout.LayoutParams hlTagParams = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                hlTagParams.rightMargin = dpToPx(4);
+                hlTagParams.bottomMargin = dpToPx(4);
+                tvHlTag.setLayoutParams(hlTagParams);
+                hlFlow.addView(tvHlTag);
+            }
+
+            card.addView(hlFlow);
+        }
 
         // === 推荐理由 ===
         if (item.getReason() != null && !item.getReason().isEmpty()) {

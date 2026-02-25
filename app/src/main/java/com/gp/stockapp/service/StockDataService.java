@@ -22,10 +22,12 @@ import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
 import com.gp.stockapp.repository.StockRepository;
+import com.gp.stockapp.utils.TradingDayHelper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -181,28 +183,55 @@ public class StockDataService extends Service {
                 Log.d(TAG, "正在抓取市场要闻...");
                 List<StockNews> newsList = marketApi.fetchMarketNews();
                 if (newsList != null && !newsList.isEmpty()) {
-                    // 用AI为重大新闻推荐相关A股股票
+                    // 用AI为重大新闻推荐相关A股股票并标记重要性
                     enrichNewsWithStockRecommendations(newsList);
-                    stockRepository.saveNewsData(newsList);
-                    Log.d(TAG, "成功更新市场要闻: 抓取并保存了 " + newsList.size() + " 条新闻");
+                    
+                    // 只保留AI判定为重大新闻的（importance >= 3）
+                    List<StockNews> majorNews = new ArrayList<>();
+                    for (StockNews news : newsList) {
+                        if (news.getImportance() >= 3) {
+                            majorNews.add(news);
+                        }
+                    }
+                    Log.d(TAG, "AI筛选重大新闻: " + majorNews.size() + "/" + newsList.size() + " 条");
+                    
+                    if (!majorNews.isEmpty()) {
+                        // 合并保存（新的在前，保留最多10条）
+                        stockRepository.mergeAndSaveNews(majorNews, 10);
+                        Log.d(TAG, "成功更新市场要闻: 筛选并保存了 " + majorNews.size() + " 条重大新闻");
+                    } else {
+                        Log.d(TAG, "本次无重大新闻");
+                    }
                 } else {
                     Log.w(TAG, "市场要闻抓取结果为空（可能所有源都失败了）");
                 }
 
-                // 抓取热门股票数据（龙虎榜、涨停板、连板股、涨幅榜）
+                // 抓取热门股票数据（龙虎榜、涨停板、连板股、活跃股）
                 // 每5分钟抓取一次，避免频繁请求
                 long now = System.currentTimeMillis();
                 if (now - lastHotDataFetchTime >= HOT_DATA_FETCH_INTERVAL) {
-                    Log.d(TAG, "正在抓取热门股票数据（龙虎榜/涨停板/连板/涨幅榜）...");
+                    Log.d(TAG, "正在抓取热门股票数据（龙虎榜/涨停板/连板/活跃股）...");
                     try {
+                        // 当天数据（尾盘策略用）
                         String dateStr = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.CHINA)
                                 .format(new java.util.Date());
                         HotStockData hotData = hotStockApi.fetchAllHotData(dateStr);
                         if (hotData != null) {
                             stockRepository.saveHotStockData(hotData);
-                            lastHotDataFetchTime = now;
-                            Log.d(TAG, "成功更新热门股票数据");
+                            Log.d(TAG, "成功更新当天热门股票数据");
                         }
+                        
+                        // 前一个交易日数据（竞价策略用）
+                        String prevDateStr = TradingDayHelper.getPreviousTradingDayStr(new java.util.Date());
+                        if (prevDateStr != null && !prevDateStr.isEmpty()) {
+                            HotStockData prevHotData = hotStockApi.fetchAllHotData(prevDateStr);
+                            if (prevHotData != null) {
+                                stockRepository.savePrevDayHotStockData(prevHotData);
+                                Log.d(TAG, "成功更新前一交易日热门股票数据: " + prevDateStr);
+                            }
+                        }
+                        
+                        lastHotDataFetchTime = now;
                     } catch (Exception e) {
                         Log.e(TAG, "抓取热门股票数据失败", e);
                     }
@@ -244,8 +273,14 @@ public class StockDataService extends Service {
 
             String prompt = "你是一位专业的A股投资分析师。以下是最新的财经新闻列表：\n\n" +
                     newsText.toString() +
-                    "\n请分析以上新闻，找出对A股市场有重大影响的新闻（如政策变化、国际事件、行业重大变动等），" +
-                    "并为这些重大新闻推荐最直接受益或受影响的A股股票（1-3只）。\n\n" +
+                    "\n请分析以上新闻，为每条新闻评估其对A股市场的影响程度（importance 1-5），" +
+                    "并为重大新闻（importance >= 3）推荐最直接受益或受影响的A股股票（1-3只）。\n\n" +
+                    "**重大新闻的判定标准（importance >= 3）**：\n" +
+                    "- 5分：重大政策变化（降准降息、监管新规）、国际重大事件（贸易战、地缘冲突升级）\n" +
+                    "- 4分：行业重大变动、大额资金流向变化、重要经济数据发布\n" +
+                    "- 3分：板块级别利好利空、市场情绪重大转变、重要人物发言\n" +
+                    "- 2分：普通行业资讯、常规数据更新\n" +
+                    "- 1分：个股新闻、无关紧要的消息\n\n" +
                     "请严格按以下JSON格式返回：\n" +
                     "{\n" +
                     "  \"recommendations\": [\n" +
@@ -258,9 +293,10 @@ public class StockDataService extends Service {
                     "}\n\n" +
                     "说明：\n" +
                     "- news_index: 新闻编号（从1开始）\n" +
-                    "- stocks: 推荐的A股股票，格式如\"贵州茅台(600519)、宁德时代(300750)\"\n" +
-                    "- importance: 重要程度1-5（5最重要）\n" +
-                    "- 只返回有重大影响的新闻，普通新闻不需要返回\n" +
+                    "- stocks: 推荐的A股股票（仅importance>=3时需要填写），格式如\"贵州茅台(600519)、宁德时代(300750)\"\n" +
+                    "- importance: 每条新闻都必须评分（1-5），importance>=3的才算重大新闻\n" +
+                    "- 所有新闻都必须返回（包括不重要的），以便客户端过滤\n" +
+                    "- stocks字段：importance<3的新闻可以不填stocks\n" +
                     "- 推荐的股票必须是A股上市公司，确保代码准确\n" +
                     "- 只返回JSON，不要其他文字";
 
@@ -302,19 +338,27 @@ public class StockDataService extends Service {
                 JSONObject rec = recommendations.getJSONObject(i);
                 int newsIndex = rec.optInt("news_index", -1) - 1; // 转为0-based
                 String stocks = rec.optString("stocks", "");
-                int importance = rec.optInt("importance", 3);
+                int importance = rec.optInt("importance", 1);
 
-                if (newsIndex >= 0 && newsIndex < newsList.size() && !stocks.isEmpty()) {
+                if (newsIndex >= 0 && newsIndex < newsList.size()) {
                     StockNews news = newsList.get(newsIndex);
-                    news.setRecommendedStocks(stocks);
+                    // 设置重要性评分（所有新闻都设置）
                     news.setImportance(importance);
                     if (importance >= 4) {
                         news.setImpactLevel("high");
                     } else if (importance >= 3) {
                         news.setImpactLevel("medium");
+                    } else {
+                        news.setImpactLevel("low");
                     }
-                    appliedCount++;
-                    Log.d(TAG, "新闻[" + (newsIndex + 1) + "] 推荐股票: " + stocks);
+                    // 仅为重大新闻设置推荐股票
+                    if (!stocks.isEmpty() && importance >= 3) {
+                        news.setRecommendedStocks(stocks);
+                        appliedCount++;
+                        Log.d(TAG, "新闻[" + (newsIndex + 1) + "] importance=" + importance + " 推荐股票: " + stocks);
+                    } else {
+                        Log.d(TAG, "新闻[" + (newsIndex + 1) + "] importance=" + importance + " (非重大)");
+                    }
                 }
             }
             Log.d(TAG, "成功为 " + appliedCount + " 条重大新闻添加了股票推荐");

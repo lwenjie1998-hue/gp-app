@@ -26,6 +26,7 @@ import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.utils.PromptLoader;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -430,8 +431,9 @@ public class AIRecommendationService extends Service {
     /**
      * 构建融合热门数据+市场数据的完整Prompt
      * 将龙虎榜、涨停板、连板股等真实数据提供给AI
+     * @param strategyType 策略类型: "open_auction"=竞价(用前一交易日龙虎榜+技术指标+竞价数据), "closing"=尾盘(用大盘走势+板块+宏观), 其他=用当天数据
      */
-    private String buildFullStrategyPrompt(String strategyPrompt, List<MarketIndex> indices, List<StockNews> newsList) {
+    private String buildFullStrategyPrompt(String strategyPrompt, List<MarketIndex> indices, List<StockNews> newsList, String strategyType) {
         StringBuilder sb = new StringBuilder();
         
         // 添加具体策略要求
@@ -440,20 +442,76 @@ public class AIRecommendationService extends Service {
         // 添加市场数据
         sb.append(buildMarketDataText(indices, newsList));
         
-        // 添加热门股票数据（龙虎榜、涨停板、连板股、涨幅榜）
-        HotStockData hotData = stockRepository.getHotStockData();
-        if (hotData != null) {
-            String hotText = hotData.toAnalysisText();
-            if (hotText != null && !hotText.isEmpty()) {
-                sb.append("\n## 热门股票实时数据\n\n");
-                sb.append("以下是当前市场的真实热点数据，请基于这些数据进行分析和推荐：\n\n");
-                sb.append(hotText);
-                sb.append("\n**重要提示**：请优先从以上数据中的中小市值股票（流通市值30-120亿）中选择推荐标的。");
-                sb.append("龙虎榜净买入、涨停板、连板股是游资参与度最高的标的，请结合题材热点重点分析。\n");
+        if ("closing".equals(strategyType)) {
+            // ===== 尾盘策略：聚焦大盘走势、板块轮动、国际国内局势、主力资金和技术指标 =====
+            Log.d(TAG, "尾盘策略: 聚焦大盘走势+板块分析+宏观局势+技术指标");
+            
+            // 只提供活跃股数据（用于板块分析和主力资金判断），不提供龙虎榜等个股热点数据
+            HotStockData hotData = stockRepository.getHotStockData();
+            if (hotData != null && hotData.getTopGainers() != null && !hotData.getTopGainers().isEmpty()) {
+                sb.append("\n## 当日主板活跃股数据（按成交额排序）\n\n");
+                sb.append("以下是今日成交最活跃的主板股票，请用于分析板块资金流向和主力动向：\n\n");
+                for (HotStockData.TopGainerItem item : hotData.getTopGainers()) {
+                    sb.append("- ").append(item.toString()).append("\n");
+                }
+                sb.append("\n**分析要点**：从以上活跃股中提取板块信息和资金流向，结合大盘走势和国际国内局势，");
+                sb.append("筛选尾盘处于技术支撑位附近、所在板块具有持续性的中小市值标的（流通市值30-120亿）。\n");
+            }
+            
+            sb.append("\n## 分析重点提示\n\n");
+            sb.append("请重点从以下维度分析：\n");
+            sb.append("1. 大盘全天走势形态和尾盘趋势\n");
+            sb.append("2. 板块资金轮动方向和明日预判\n");
+            sb.append("3. 新闻中的国际国内局势对A股的影响\n");
+            sb.append("4. 主力资金流入方向和成交量变化\n");
+            sb.append("5. 推荐标的的技术面信号（均线支撑/MACD/KDJ/RSI等）\n");
+            
+        } else if ("open_auction".equals(strategyType)) {
+            // ===== 竞价策略：昨日龙虎榜+热搜榜+技术指标+集合竞价 =====
+            Log.d(TAG, "竞价策略: 使用前一交易日龙虎榜+热搜+技术指标+竞价分析");
+            
+            HotStockData hotData = stockRepository.getPrevDayHotStockData();
+            if (hotData != null) {
+                String hotText = hotData.toAnalysisText();
+                if (hotText != null && !hotText.isEmpty()) {
+                    sb.append("\n## 昨日热门股票数据（龙虎榜+涨停板+连板+活跃股）\n\n");
+                    sb.append("以下是前一交易日的真实市场热点数据，请基于这些数据进行分析和推荐：\n\n");
+                    sb.append(hotText);
+                    sb.append("\n**重要提示**：请优先从以上龙虎榜和活跃股数据中，筛选流通市值30-120亿的中小盘标的。\n");
+                }
+            }
+            
+            sb.append("\n## 竞价分析要求\n\n");
+            sb.append("请对筛选出的标的，从以下维度进行综合评估：\n");
+            sb.append("1. **昨日龙虎榜**：净买入额、知名游资/机构席位参与情况\n");
+            sb.append("2. **热搜/题材热度**：结合新闻判断标的所在题材的市场热度和持续性\n");
+            sb.append("3. **技术指标验证**：均线排列(5/10/20日)、MACD金叉/红柱、KDJ超卖区金叉、RSI位置、量能变化\n");
+            sb.append("4. **集合竞价预判**：根据龙虎榜和题材热度，预判竞价高开/低开可能性，给出介入条件\n");
+            sb.append("5. 每只推荐必须提到至少一项技术指标信号作为辅助依据\n");
+            
+        } else {
+            // ===== 板块策略等其他类型：使用当天全量热门数据 =====
+            HotStockData hotData = stockRepository.getHotStockData();
+            String dataLabel = "当天";
+            Log.d(TAG, "板块策略: 使用当天热门数据");
+            
+            if (hotData != null) {
+                String hotText = hotData.toAnalysisText();
+                if (hotText != null && !hotText.isEmpty()) {
+                    sb.append("\n## 热门股票数据（").append(dataLabel).append("）\n\n");
+                    sb.append("以下是").append(dataLabel).append("市场的真实热点数据，请基于这些数据进行分析和推荐：\n\n");
+                    sb.append(hotText);
+                    sb.append("\n**重要提示**：请优先从以上数据中的中小市值股票（流通市值30-120亿）中选择推荐标的。");
+                    sb.append("龙虎榜净买入、涨停板、连板股是游资参与度最高的标的，请结合题材热点重点分析。\n");
+                }
             }
         }
         
         sb.append("\n请根据以上数据进行分析，输出JSON格式结果。");
+        sb.append("\n\n**最终强制提醒（违反则结果无效）：**");
+        sb.append("\n1. 股票代码必须以600或000开头（主板），严禁出现300（创业板）、688（科创板）开头的代码");
+        sb.append("\n2. 已涨停或接近涨停（距涨停价<1%）的股票绝对不能推荐");
+        sb.append("\n3. 输出前逐只核对股票代码前3位，不符合600/000的必须替换");
         
         return sb.toString();
     }
@@ -463,7 +521,7 @@ public class AIRecommendationService extends Service {
      */
     private void analyzeSectorStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
         try {
-            String prompt = buildFullStrategyPrompt(getSectorPrompt(), indices, newsList);
+            String prompt = buildFullStrategyPrompt(getSectorPrompt(), indices, newsList, "sector");
 
             String response = glm4Client.analyze(prompt);
             if (response != null && !response.isEmpty()) {
@@ -483,12 +541,14 @@ public class AIRecommendationService extends Service {
 
     /**
      * 开盘竞价推荐分析（量化+游资融合策略）
+     * 使用GLM-5高精度模型
      */
     private void analyzeAuctionStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
         try {
-            String prompt = buildFullStrategyPrompt(getAuctionPrompt(), indices, newsList);
+            String prompt = buildFullStrategyPrompt(getAuctionPrompt(), indices, newsList, "open_auction");
 
-            String response = glm4Client.analyze(prompt);
+            Log.d(TAG, "竞价推荐: 使用GLM-5高精度模型");
+            String response = glm4Client.analyzePremium(prompt);
             if (response != null && !response.isEmpty()) {
                 StrategyRecommendation recommendation = parseStrategyRecommendation(response, "open_auction");
                 if (recommendation != null) {
@@ -506,12 +566,14 @@ public class AIRecommendationService extends Service {
 
     /**
      * 尾盘推荐分析（量化+游资融合策略）
+     * 使用GLM-5高精度模型
      */
     private void analyzeClosingStrategy(List<MarketIndex> indices, List<StockNews> newsList) {
         try {
-            String prompt = buildFullStrategyPrompt(getClosingPrompt(), indices, newsList);
+            String prompt = buildFullStrategyPrompt(getClosingPrompt(), indices, newsList, "closing");
 
-            String response = glm4Client.analyze(prompt);
+            Log.d(TAG, "尾盘推荐: 使用GLM-5高精度模型");
+            String response = glm4Client.analyzePremium(prompt);
             if (response != null && !response.isEmpty()) {
                 StrategyRecommendation recommendation = parseStrategyRecommendation(response, "closing");
                 if (recommendation != null) {
@@ -618,7 +680,13 @@ public class AIRecommendationService extends Service {
         try {
             com.google.gson.Gson gson = new com.google.gson.Gson();
             StrategyRecommendation rec = gson.fromJson(response, StrategyRecommendation.class);
-            if (rec != null) return rec;
+            if (rec != null) {
+                // 竞价和尾盘推荐：代码层面强制过滤非主板股票
+                if ("open_auction".equals(type) || "closing".equals(type)) {
+                    filterMainBoardOnly(rec);
+                }
+                return rec;
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error parsing strategy recommendation JSON", e);
         }
@@ -644,6 +712,52 @@ public class AIRecommendationService extends Service {
                 break;
         }
         return rec;
+    }
+
+    /**
+     * 强制过滤非主板股票（竞价/尾盘推荐专用）
+     * 只保留600xxx（上证主板）和000xxx（深证主板）的股票
+     * 移除300xxx（创业板）、688xxx（科创板）等非主板股票
+     */
+    private void filterMainBoardOnly(StrategyRecommendation rec) {
+        if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) return;
+        
+        List<StrategyRecommendation.RecommendItem> filtered = new ArrayList<>();
+        for (StrategyRecommendation.RecommendItem item : rec.getItems()) {
+            String code = item.getCode();
+            if (code == null || code.isEmpty()) {
+                // 没有代码的条目保留（可能是板块推荐等）
+                filtered.add(item);
+                continue;
+            }
+            // 去除可能的前缀如 sh/sz/SH/SZ
+            String cleanCode = code.replaceAll("(?i)^(sh|sz)", "").trim();
+            if (cleanCode.startsWith("600") || cleanCode.startsWith("601") || 
+                    cleanCode.startsWith("603") || cleanCode.startsWith("605") || 
+                    cleanCode.startsWith("000") || cleanCode.startsWith("001") ||
+                    cleanCode.startsWith("002")) {
+                // 更新为纯数字代码
+                item.setCode(cleanCode);
+                filtered.add(item);
+                Log.d(TAG, "保留主板股票: " + item.getName() + "(" + cleanCode + ")");
+            } else {
+                Log.w(TAG, "过滤非主板股票: " + item.getName() + "(" + code + ") - 非600/000开头");
+            }
+        }
+        
+        if (filtered.size() < rec.getItems().size()) {
+            Log.d(TAG, "主板过滤: " + rec.getItems().size() + " -> " + filtered.size() + " 只");
+        }
+        
+        // 如果过滤后还有数据，使用过滤后的结果
+        // 如果全部被过滤掉了，保留原始数据但在摘要中添加提示
+        if (!filtered.isEmpty()) {
+            rec.setItems(filtered);
+        } else {
+            Log.w(TAG, "主板过滤后无剩余股票，保留原始推荐并标注");
+            String originalSummary = rec.getSummary() != null ? rec.getSummary() : "";
+            rec.setSummary(originalSummary + "（注意：以下部分推荐含非主板股票，请自行甄别）");
+        }
     }
 
     // ===== 策略 Prompt =====
@@ -682,82 +796,94 @@ public class AIRecommendationService extends Service {
     }
 
     /**
-     * 开盘竞价推荐 Prompt（量化+游资融合策略）
+     * 开盘竞价推荐 Prompt（昨日龙虎榜+热搜+技术指标+集合竞价）
      */
     private String getAuctionPrompt() {
         String prompt = promptLoader.loadAuctionStrategyPrompt();
         if (prompt != null && !prompt.isEmpty()) return prompt;
 
-        return "你同时具备量化分析师和游资操盘手的双重能力，专精A股集合竞价阶段的短线狙击。\n" +
-                "融合量化数据信号与游资实战经验，推荐5只适合竞价介入的A股短线标的。\n\n" +
-                "量化筛选：MACD/KDJ/RSI/均线多头排列/量能放大/突破信号\n" +
-                "游资逻辑：龙头优先/弱转强/题材爆发/资金合力/情绪共振\n" +
-                "综合评分 = 量化技术信号(30%) + 动量(20%) + 题材(20%) + 资金(15%) + 情绪(15%)\n\n" +
+        return "你是一名专精A股短线交易的实战高手，擅长综合昨日龙虎榜、热搜榜、技术指标和集合竞价情况，精准狙击开盘短线机会。\n\n" +
+                "**重要限制：**\n" +
+                "1. 只推荐主板股票（上证600xxx、深证000xxx），严禁推荐创业板(300xxx)、科创板(688xxx)和北交所\n" +
+                "2. 绝对禁止推荐已经涨停或接近涨停的股票（距涨停价<1%不可推荐）\n" +
+                "3. 只推荐流通市值30-120亿的中小盘股\n\n" +
+                "**分析维度（必须涵盖）：**\n" +
+                "1. 昨日龙虎榜：净买入额、游资/机构席位参与、资金占比\n" +
+                "2. 热搜/题材热度：题材持续性、市场关注度\n" +
+                "3. 技术指标：MACD/KDJ/RSI/均线多头排列/量能变化/突破信号\n" +
+                "4. 集合竞价信号：高开幅度预判、量比、匹配量变化\n" +
+                "综合评分 = 龙虎榜资金(25%) + 技术信号(25%) + 题材热度(20%) + 竞价表现(20%) + 情绪(10%)\n\n" +
                 "请输出JSON格式，包含以下字段：\n" +
                 "{\n" +
                 "  \"title\": \"开盘竞价推荐\",\n" +
-                "  \"summary\": \"今日竞价策略概述(50字内，含量化信号和市场情绪判断)\",\n" +
+                "  \"summary\": \"今日竞价策略概述(50字内)\",\n" +
                 "  \"confidence\": 0-100,\n" +
                 "  \"risk_level\": \"high\",\n" +
                 "  \"items\": [\n" +
                 "    {\n" +
                 "      \"name\": \"股票名称\",\n" +
                 "      \"code\": \"股票代码(6位数字)\",\n" +
-                "      \"reason\": \"推荐理由(30字内，融合量化信号和游资逻辑)\",\n" +
-                "      \"highlight\": \"核心亮点(如:量游共振/技术突破+龙头确认)\",\n" +
+                "      \"reason\": \"推荐理由(30字内，需引用龙虎榜+技术指标+竞价信号)\",\n" +
+                "      \"highlight\": \"核心亮点(如:龙虎榜净买入+MACD金叉+竞价高开)\",\n" +
                 "      \"score\": 0-100,\n" +
                 "      \"entry_timing\": \"竞价介入策略\",\n" +
-                "      \"stop_loss\": \"止损位(基于量化支撑位)\",\n" +
-                "      \"tags\": [\"打板\", \"龙头\", \"弱转强\", \"量化突破\"]\n" +
+                "      \"stop_loss\": \"止损位(基于技术支撑位)\",\n" +
+                "      \"tags\": [\"龙虎榜\", \"技术突破\", \"竞价强势\", \"热搜\"]\n" +
                 "    }\n" +
                 "  ],\n" +
                 "  \"market_sentiment\": \"市场情绪周期(冰点/修复/高潮/分化/退潮)\",\n" +
                 "  \"main_line\": \"当前最强主线题材\",\n" +
                 "  \"strategy_note\": \"仓位管理与风控纪律提醒\",\n" +
-                "  \"analysis_text\": \"详细分析文本(含量化扫描和游资研判)\"\n" +
+                "  \"analysis_text\": \"详细分析(含龙虎榜分析+技术面验证+竞价信号)\"\n" +
                 "}\n\n" +
-                "只推荐5只股票，短线持有1-3天，必须给出止损位。\n" +
-                "**重要：只推荐A股股票（沪深交易所上市），不要推荐港股、美股或其他市场的股票**";
+                "只推荐5只股票，每只必须给出技术指标依据和止损位。\n" +
+                "**重要：只推荐主板股票（600xxx/000xxx），不要推荐创业板/科创板/港股/美股，不要推荐已涨停或接近涨停的股票**";
     }
 
     /**
-     * 尾盘推荐 Prompt（量化+游资融合策略）
+     * 尾盘推荐 Prompt（大盘走势+板块轮动+国际国内局势+主力资金技术指标）
      */
     private String getClosingPrompt() {
         String prompt = promptLoader.loadClosingStrategyPrompt();
         if (prompt != null && !prompt.isEmpty()) return prompt;
 
-        return "你同时具备量化分析师和游资操盘手的双重能力，专精A股尾盘低吸和隔夜套利。\n" +
-                "融合量化数据分析与游资实战经验，推荐5只适合尾盘介入的A股短线标的。\n\n" +
-                "量化筛选：趋势确认/均线支撑/动量评估/量能分析/波动率评估\n" +
-                "游资逻辑：强势回调低吸/炸板回封/板块尾盘异动/弱转强/连板确认\n" +
-                "综合评分 = 量化趋势(25%) + 尾盘异动(20%) + 次日高开概率(20%) + 题材(15%) + 资金(10%) + 风控(10%)\n\n" +
+        return "你是一名专精A股大势研判和板块轮动分析的实战高手，擅长从宏观大盘走势、板块资金流向、国际国内局势以及主力资金动向中，精准发现尾盘低吸机会。\n\n" +
+                "**重要限制：**\n" +
+                "1. 只推荐主板股票（上证600xxx、深证000xxx），严禁推荐创业板(300xxx)、科创板(688xxx)和北交所\n" +
+                "2. 绝对禁止推荐已经涨停或接近涨停的股票（距涨停价<1%不可推荐）\n" +
+                "3. 只推荐流通市值30-120亿的中小盘股\n\n" +
+                "**分析维度（自上而下，必须涵盖）：**\n" +
+                "1. 大盘走势：全天走势形态、量价配合、尾盘趋势、技术位\n" +
+                "2. 板块轮动：领涨/领跌板块、资金流向、明日轮动预判\n" +
+                "3. 国际国内局势：外盘影响、政策动向、地缘因素\n" +
+                "4. 主力资金+技术指标：均线支撑/MACD/KDJ/RSI/成交量变化\n" +
+                "综合评分 = 大盘环境(25%) + 板块趋势(25%) + 技术面信号(20%) + 宏观因素(15%) + 隔夜风控(15%)\n\n" +
                 "请输出JSON格式，包含以下字段：\n" +
                 "{\n" +
                 "  \"title\": \"尾盘推荐\",\n" +
-                "  \"summary\": \"尾盘策略概述(50字内，含量化信号和市场情绪判断)\",\n" +
+                "  \"summary\": \"尾盘策略概述(50字内，含大盘走势+板块方向)\",\n" +
                 "  \"confidence\": 0-100,\n" +
                 "  \"risk_level\": \"low/medium/high\",\n" +
                 "  \"items\": [\n" +
                 "    {\n" +
                 "      \"name\": \"股票名称\",\n" +
                 "      \"code\": \"股票代码(6位数字)\",\n" +
-                "      \"reason\": \"推荐理由(30字内，融合量化信号和游资逻辑)\",\n" +
-                "      \"highlight\": \"核心亮点(如:量化支撑+龙头低吸/弱转强+动量反转)\",\n" +
+                "      \"reason\": \"推荐理由(30字内，引用板块走势+技术指标)\",\n" +
+                "      \"highlight\": \"核心亮点(如:板块龙头回调/主力资金流入/技术超卖)\",\n" +
                 "      \"score\": 0-100,\n" +
                 "      \"entry_timing\": \"买入时间和价格策略\",\n" +
-                "      \"stop_loss\": \"止损位(基于量化支撑位)\",\n" +
+                "      \"stop_loss\": \"止损位(基于技术支撑位)\",\n" +
                 "      \"next_day_plan\": \"次日操作预案(高开/平开/低开怎么做)\",\n" +
-                "      \"tags\": [\"隔夜\", \"低吸\", \"弱转强\", \"量化支撑\"]\n" +
+                "      \"tags\": [\"板块轮动\", \"技术支撑\", \"主力资金\", \"低吸\"]\n" +
                 "    }\n" +
                 "  ],\n" +
                 "  \"market_sentiment\": \"全天市场情绪总结(冰点/修复/高潮/分化/退潮)\",\n" +
-                "  \"main_line\": \"今日最强主线题材\",\n" +
-                "  \"overnight_risk\": \"隔夜风险评估(外盘、消息面等)\",\n" +
+                "  \"main_line\": \"今日最强板块方向及明日轮动预判\",\n" +
+                "  \"overnight_risk\": \"隔夜风险评估(外盘/国际局势/政策面/周末效应)\",\n" +
                 "  \"strategy_note\": \"尾盘风控纪律(单只最多3成仓，隔夜亏损不超3%)\",\n" +
-                "  \"analysis_text\": \"详细分析文本(含量化复盘和游资研判)\"\n" +
+                "  \"analysis_text\": \"详细分析(含大盘复盘+板块分析+国际国内局势+技术面)\"\n" +
                 "}\n\n" +
                 "只推荐5只股票，隔夜持仓次日择机卖出，必须给出止损位和次日操作预案。\n" +
-                "**重要：只推荐A股股票（沪深交易所上市），不要推荐港股、美股或其他市场的股票**";
+                "**重要：只推荐主板股票（600xxx/000xxx），不要推荐创业板/科创板/港股/美股，不要推荐已涨停或接近涨停的股票**";
     }
 }

@@ -278,6 +278,7 @@ public class HotStockData {
         // 涨停板
         if (limitUpList != null && !limitUpList.isEmpty()) {
             sb.append("### 今日涨停板（").append(limitUpList.size()).append("只）\n");
+            sb.append("**注意：以下涨停股仅供了解市场情绪，绝对禁止推荐已涨停的股票！**\n");
             sb.append("涨停个股明细：\n");
             for (LimitUpItem item : limitUpList) {
                 sb.append("- ").append(item.toString()).append("\n");
@@ -288,15 +289,16 @@ public class HotStockData {
         // 连板股
         if (continuousLimitList != null && !continuousLimitList.isEmpty()) {
             sb.append("### 连板股（市场高度）\n");
+            sb.append("**注意：以下连板股仅供了解市场高度，绝对禁止直接推荐已涨停的股票！**\n");
             for (ContinuousLimitItem item : continuousLimitList) {
                 sb.append("- ").append(item.toString()).append("\n");
             }
             sb.append("\n");
         }
 
-        // 涨幅榜
+        // 主板活跃股（按成交额排序）
         if (topGainers != null && !topGainers.isEmpty()) {
-            sb.append("### 涨幅榜TOP（活跃股）\n");
+            sb.append("### 主板活跃股TOP（按成交额排序）\n");
             for (TopGainerItem item : topGainers) {
                 sb.append("- ").append(item.toString()).append("\n");
             }
