@@ -98,3 +98,4 @@ Desktop.ini
 # Project specific
 config.properties
 !app/config.properties
+/.idea/
