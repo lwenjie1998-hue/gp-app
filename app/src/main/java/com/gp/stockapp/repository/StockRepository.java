@@ -4,6 +4,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import com.gp.stockapp.db.AppDatabase;
+import com.gp.stockapp.db.ContinuousLimitDao;
+import com.gp.stockapp.db.ContinuousLimitEntity;
+import com.gp.stockapp.db.DragonTigerDao;
+import com.gp.stockapp.db.DragonTigerEntity;
 import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketAnalysis;
 import com.gp.stockapp.model.MarketIndex;
@@ -24,10 +29,12 @@ import java.util.concurrent.Executors;
 /**
  * 大盘数据仓库
  * 负责存储和查询大盘指数、AI分析结果和新闻数据
+ * 
+ * 优化：添加内存缓存层，减少 SharedPreferences 读取次数
  */
 public class StockRepository {
     private static final String TAG = "StockRepository";
-    private static StockRepository instance;
+    private static volatile StockRepository instance;
 
     private static final String PREF_NAME = "market_data_prefs";
     private static final String KEY_INDICES = "market_indices";
@@ -42,21 +49,89 @@ public class StockRepository {
     private static final String KEY_HOT_STOCK_DATA = "hot_stock_data";
     private static final String KEY_PREV_DAY_HOT_STOCK_DATA = "prev_day_hot_stock_data";
 
-    private SharedPreferences preferences;
-    private Gson gson;
-    private ExecutorService executorService;
+    // 缓存过期时间（毫秒）
+    private static final long CACHE_TTL = 60_000; // 1分钟
+
+    private final SharedPreferences preferences;
+    private final Gson gson;
+    private final ExecutorService executorService;
+    private final AppDatabase appDatabase;
+    private final DragonTigerDao dragonTigerDao;
+    private final ContinuousLimitDao continuousLimitDao;
+
+    // ===== 内存缓存 =====
+    private volatile List<MarketIndex> indicesCache;
+    private volatile long indicesCacheTime = 0;
+    
+    private volatile List<StockNews> newsCache;
+    private volatile long newsCacheTime = 0;
+    
+    private volatile MarketAnalysis analysisCache;
+    private volatile long analysisCacheTime = 0;
+    
+    private volatile StrategyRecommendation sectorCache;
+    private volatile long sectorCacheTime = 0;
+    
+    private volatile StrategyRecommendation auctionCache;
+    private volatile long auctionCacheTime = 0;
+    
+    private volatile StrategyRecommendation closingCache;
+    private volatile long closingCacheTime = 0;
+    
+    private volatile HotStockData hotStockCache;
+    private volatile long hotStockCacheTime = 0;
+    
+    private volatile HotStockData prevDayHotStockCache;
+    private volatile long prevDayHotStockCacheTime = 0;
 
     private StockRepository(Context context) {
         preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         gson = new Gson();
         executorService = Executors.newSingleThreadExecutor();
+        appDatabase = AppDatabase.getInstance(context);
+        dragonTigerDao = appDatabase.dragonTigerDao();
+        continuousLimitDao = appDatabase.continuousLimitDao();
     }
 
-    public static synchronized StockRepository getInstance(Context context) {
+    public static StockRepository getInstance(Context context) {
         if (instance == null) {
-            instance = new StockRepository(context.getApplicationContext());
+            synchronized (StockRepository.class) {
+                if (instance == null) {
+                    instance = new StockRepository(context.getApplicationContext());
+                }
+            }
         }
         return instance;
+    }
+
+    /**
+     * 检查缓存是否有效
+     */
+    private boolean isCacheValid(long cacheTime) {
+        return System.currentTimeMillis() - cacheTime < CACHE_TTL;
+    }
+
+    /**
+     * 清除所有内存缓存
+     */
+    public void clearMemoryCache() {
+        indicesCache = null;
+        indicesCacheTime = 0;
+        newsCache = null;
+        newsCacheTime = 0;
+        analysisCache = null;
+        analysisCacheTime = 0;
+        sectorCache = null;
+        sectorCacheTime = 0;
+        auctionCache = null;
+        auctionCacheTime = 0;
+        closingCache = null;
+        closingCacheTime = 0;
+        hotStockCache = null;
+        hotStockCacheTime = 0;
+        prevDayHotStockCache = null;
+        prevDayHotStockCacheTime = 0;
+        Log.d(TAG, "Memory cache cleared");
     }
 
     // ===== 指数数据管理 =====
@@ -134,13 +209,25 @@ public class StockRepository {
     }
 
     /**
-     * 获取最新的大盘指数数据
+     * 获取最新的大盘指数数据（带缓存）
      */
     public List<MarketIndex> getMarketIndices() {
+        // 检查缓存
+        if (indicesCache != null && isCacheValid(indicesCacheTime)) {
+            return new ArrayList<>(indicesCache);
+        }
+        
+        // 从持久化存储加载
         String json = preferences.getString(KEY_INDICES, "[]");
         Type type = new TypeToken<List<MarketIndex>>() {}.getType();
         List<MarketIndex> list = gson.fromJson(json, type);
-        return list != null ? list : new ArrayList<>();
+        list = list != null ? list : new ArrayList<>();
+        
+        // 更新缓存
+        indicesCache = new ArrayList<>(list);
+        indicesCacheTime = System.currentTimeMillis();
+        
+        return list;
     }
 
     /**
@@ -162,6 +249,10 @@ public class StockRepository {
      * 保存最新AI分析结果
      */
     public void saveMarketAnalysis(MarketAnalysis analysis) {
+        // 更新内存缓存
+        analysisCache = analysis;
+        analysisCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             // 保存最新分析
             String json = gson.toJson(analysis);
@@ -181,13 +272,20 @@ public class StockRepository {
     }
 
     /**
-     * 获取最新AI分析结果
+     * 获取最新AI分析结果（带缓存）
      */
     public MarketAnalysis getLatestMarketAnalysis() {
+        // 检查缓存
+        if (analysisCache != null && isCacheValid(analysisCacheTime)) {
+            return analysisCache;
+        }
+        
         String json = preferences.getString(KEY_ANALYSIS, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, MarketAnalysis.class);
+            analysisCache = gson.fromJson(json, MarketAnalysis.class);
+            analysisCacheTime = System.currentTimeMillis();
+            return analysisCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing market analysis", e);
             return null;
@@ -210,6 +308,10 @@ public class StockRepository {
      * 保存板块推荐
      */
     public void saveSectorRecommendation(StrategyRecommendation recommendation) {
+        // 更新内存缓存
+        sectorCache = recommendation;
+        sectorCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(recommendation);
             preferences.edit().putString(KEY_SECTOR_RECOMMENDATION, json).apply();
@@ -218,13 +320,19 @@ public class StockRepository {
     }
 
     /**
-     * 获取板块推荐
+     * 获取板块推荐（带缓存）
      */
     public StrategyRecommendation getSectorRecommendation() {
+        if (sectorCache != null && isCacheValid(sectorCacheTime)) {
+            return sectorCache;
+        }
+        
         String json = preferences.getString(KEY_SECTOR_RECOMMENDATION, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, StrategyRecommendation.class);
+            sectorCache = gson.fromJson(json, StrategyRecommendation.class);
+            sectorCacheTime = System.currentTimeMillis();
+            return sectorCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing sector recommendation", e);
             return null;
@@ -235,6 +343,10 @@ public class StockRepository {
      * 保存开盘竞价推荐（游资策略）
      */
     public void saveAuctionRecommendation(StrategyRecommendation recommendation) {
+        // 更新内存缓存
+        auctionCache = recommendation;
+        auctionCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(recommendation);
             preferences.edit().putString(KEY_AUCTION_RECOMMENDATION, json).apply();
@@ -243,13 +355,19 @@ public class StockRepository {
     }
 
     /**
-     * 获取开盘竞价推荐
+     * 获取开盘竞价推荐（带缓存）
      */
     public StrategyRecommendation getAuctionRecommendation() {
+        if (auctionCache != null && isCacheValid(auctionCacheTime)) {
+            return auctionCache;
+        }
+        
         String json = preferences.getString(KEY_AUCTION_RECOMMENDATION, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, StrategyRecommendation.class);
+            auctionCache = gson.fromJson(json, StrategyRecommendation.class);
+            auctionCacheTime = System.currentTimeMillis();
+            return auctionCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing auction recommendation", e);
             return null;
@@ -260,6 +378,10 @@ public class StockRepository {
      * 保存尾盘推荐
      */
     public void saveClosingRecommendation(StrategyRecommendation recommendation) {
+        // 更新内存缓存
+        closingCache = recommendation;
+        closingCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(recommendation);
             preferences.edit().putString(KEY_CLOSING_RECOMMENDATION, json).apply();
@@ -268,13 +390,19 @@ public class StockRepository {
     }
 
     /**
-     * 获取尾盘推荐
+     * 获取尾盘推荐（带缓存）
      */
     public StrategyRecommendation getClosingRecommendation() {
+        if (closingCache != null && isCacheValid(closingCacheTime)) {
+            return closingCache;
+        }
+        
         String json = preferences.getString(KEY_CLOSING_RECOMMENDATION, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, StrategyRecommendation.class);
+            closingCache = gson.fromJson(json, StrategyRecommendation.class);
+            closingCacheTime = System.currentTimeMillis();
+            return closingCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing closing recommendation", e);
             return null;
@@ -287,6 +415,10 @@ public class StockRepository {
      * 保存热门股票数据（龙虎榜、涨停板等）
      */
     public void saveHotStockData(HotStockData data) {
+        // 更新内存缓存
+        hotStockCache = data;
+        hotStockCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(data);
             preferences.edit().putString(KEY_HOT_STOCK_DATA, json).apply();
@@ -298,6 +430,10 @@ public class StockRepository {
      * 保存前一个交易日的热门股票数据（竞价策略专用）
      */
     public void savePrevDayHotStockData(HotStockData data) {
+        // 更新内存缓存
+        prevDayHotStockCache = data;
+        prevDayHotStockCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(data);
             preferences.edit().putString(KEY_PREV_DAY_HOT_STOCK_DATA, json).apply();
@@ -306,13 +442,19 @@ public class StockRepository {
     }
 
     /**
-     * 获取热门股票数据（当天）
+     * 获取热门股票数据（当天，带缓存）
      */
     public HotStockData getHotStockData() {
+        if (hotStockCache != null && isCacheValid(hotStockCacheTime)) {
+            return hotStockCache;
+        }
+        
         String json = preferences.getString(KEY_HOT_STOCK_DATA, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, HotStockData.class);
+            hotStockCache = gson.fromJson(json, HotStockData.class);
+            hotStockCacheTime = System.currentTimeMillis();
+            return hotStockCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing hot stock data", e);
             return null;
@@ -320,13 +462,19 @@ public class StockRepository {
     }
 
     /**
-     * 获取前一个交易日的热门股票数据（竞价策略专用）
+     * 获取前一个交易日的热门股票数据（竞价策略专用，带缓存）
      */
     public HotStockData getPrevDayHotStockData() {
+        if (prevDayHotStockCache != null && isCacheValid(prevDayHotStockCacheTime)) {
+            return prevDayHotStockCache;
+        }
+        
         String json = preferences.getString(KEY_PREV_DAY_HOT_STOCK_DATA, null);
         if (json == null || json.isEmpty()) return null;
         try {
-            return gson.fromJson(json, HotStockData.class);
+            prevDayHotStockCache = gson.fromJson(json, HotStockData.class);
+            prevDayHotStockCacheTime = System.currentTimeMillis();
+            return prevDayHotStockCache;
         } catch (Exception e) {
             Log.e(TAG, "Error parsing prev day hot stock data", e);
             return null;
@@ -339,6 +487,10 @@ public class StockRepository {
      * 保存新闻数据（直接覆盖）
      */
     public void saveNewsData(List<StockNews> newsList) {
+        // 更新内存缓存
+        newsCache = new ArrayList<>(newsList);
+        newsCacheTime = System.currentTimeMillis();
+        
         executorService.execute(() -> {
             String json = gson.toJson(newsList);
             preferences.edit().putString(KEY_NEWS, json).apply();
@@ -353,9 +505,12 @@ public class StockRepository {
      * @param maxCount 最大保留条数
      */
     public void mergeAndSaveNews(List<StockNews> newNewsList, int maxCount) {
+        // 更新内存缓存
+        newsCache = null; // 清除缓存，强制重新加载
+        
         executorService.execute(() -> {
             // 获取已有新闻
-            List<StockNews> existingNews = getAllNews();
+            List<StockNews> existingNews = getAllNewsInternal();
             
             // 合并：新的在前
             List<StockNews> merged = new ArrayList<>(newNewsList);
@@ -381,6 +536,10 @@ public class StockRepository {
                 merged = new ArrayList<>(merged.subList(0, maxCount));
             }
             
+            // 更新内存缓存
+            newsCache = new ArrayList<>(merged);
+            newsCacheTime = System.currentTimeMillis();
+            
             String json = gson.toJson(merged);
             preferences.edit().putString(KEY_NEWS, json).apply();
             Log.d(TAG, "Merged and saved " + merged.size() + " news records (new: " + newNewsList.size() + ", existing: " + existingNews.size() + ")");
@@ -388,9 +547,9 @@ public class StockRepository {
     }
 
     /**
-     * 获取所有新闻
+     * 获取所有新闻（内部方法，不带缓存）
      */
-    public List<StockNews> getAllNews() {
+    private List<StockNews> getAllNewsInternal() {
         String json = preferences.getString(KEY_NEWS, "[]");
         Type type = new TypeToken<List<StockNews>>() {}.getType();
         List<StockNews> list = gson.fromJson(json, type);
@@ -398,13 +557,26 @@ public class StockRepository {
     }
 
     /**
-     * 获取最新新闻
+     * 获取所有新闻（带缓存）
+     */
+    public List<StockNews> getAllNews() {
+        if (newsCache != null && isCacheValid(newsCacheTime)) {
+            return new ArrayList<>(newsCache);
+        }
+        
+        newsCache = getAllNewsInternal();
+        newsCacheTime = System.currentTimeMillis();
+        return new ArrayList<>(newsCache);
+    }
+
+    /**
+     * 获取最新新闻（带缓存）
      */
     public List<StockNews> getLatestNews(int limit) {
         List<StockNews> allNews = getAllNews();
         allNews.sort((n1, n2) -> Long.compare(n2.getPublishTime(), n1.getPublishTime()));
         if (allNews.size() > limit) {
-            return allNews.subList(0, limit);
+            return new ArrayList<>(allNews.subList(0, limit));
         }
         return allNews;
     }
@@ -415,6 +587,7 @@ public class StockRepository {
      * 清除所有数据
      */
     public void clearAllData() {
+        clearMemoryCache();
         preferences.edit().clear().apply();
         Log.d(TAG, "All data cleared");
     }
@@ -431,5 +604,93 @@ public class StockRepository {
                 "指数数据: %d条\n新闻数据: %d条\nAI分析: %d条",
                 indices.size(), news.size(), history.size()
         );
+    }
+    
+    // ===== 龙虎榜历史数据管理 =====
+    
+    /**
+     * 获取指定日期的龙虎榜数据
+     */
+    public List<DragonTigerEntity> getDragonTigerByDate(String tradeDate) {
+        return dragonTigerDao.getByDate(tradeDate);
+    }
+    
+    /**
+     * 获取最近N天的龙虎榜数据
+     */
+    public List<DragonTigerEntity> getDragonTigerRecentDays(String startDate) {
+        return dragonTigerDao.getRecentDays(startDate);
+    }
+    
+    /**
+     * 获取指定股票的历史龙虎榜记录
+     */
+    public List<DragonTigerEntity> getDragonTigerByCode(String code) {
+        return dragonTigerDao.getByCode(code);
+    }
+    
+    /**
+     * 获取所有有龙虎榜数据的交易日
+     */
+    public List<String> getAllDragonTigerDates() {
+        return dragonTigerDao.getAllTradeDates();
+    }
+    
+    /**
+     * 获取最新的龙虎榜交易日期
+     */
+    public String getLatestDragonTigerDate() {
+        return dragonTigerDao.getLatestTradeDate();
+    }
+    
+    /**
+     * 获取龙虎榜数据总条数
+     */
+    public int getDragonTigerCount() {
+        return dragonTigerDao.getCount();
+    }
+    
+    // ===== 连板股历史数据管理 =====
+    
+    /**
+     * 获取指定日期的连板股数据
+     */
+    public List<ContinuousLimitEntity> getContinuousLimitByDate(String tradeDate) {
+        return continuousLimitDao.getByDate(tradeDate);
+    }
+    
+    /**
+     * 获取最近N天的连板股数据
+     */
+    public List<ContinuousLimitEntity> getContinuousLimitRecentDays(String startDate) {
+        return continuousLimitDao.getRecentDays(startDate);
+    }
+    
+    /**
+     * 获取指定股票的历史连板记录
+     */
+    public List<ContinuousLimitEntity> getContinuousLimitByCode(String code) {
+        return continuousLimitDao.getByCode(code);
+    }
+    
+    /**
+     * 获取所有有连板股数据的交易日
+     */
+    public List<String> getAllContinuousLimitDates() {
+        return continuousLimitDao.getAllTradeDates();
+    }
+    
+    /**
+     * 获取最新的连板股交易日期
+     */
+    public String getLatestContinuousLimitDate() {
+        return continuousLimitDao.getLatestTradeDate();
+    }
+    
+    /**
+     * 获取连板股数据总条数
+     */
+    public int getContinuousLimitCount() {
+        return continuousLimitDao.getCount();
     }
 }

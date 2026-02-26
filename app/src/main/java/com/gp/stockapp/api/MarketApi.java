@@ -4,6 +4,7 @@ import android.util.Log;
 
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
+import com.gp.stockapp.utils.HttpClient;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -15,7 +16,6 @@ import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import okhttp3.OkHttpClient;
@@ -28,10 +28,10 @@ import okhttp3.Response;
  */
 public class MarketApi {
     private static final String TAG = "MarketApi";
-    private static MarketApi instance;
+    private static volatile MarketApi instance;
 
-    private OkHttpClient client;
-    private Gson gson;
+    private final OkHttpClient client;
+    private final Gson gson;
 
     // 新浪财经实时行情API
     private static final String SINA_API = "https://hq.sinajs.cn/list=";
@@ -52,10 +52,8 @@ public class MarketApi {
     };
 
     private MarketApi() {
-        client = new OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
+        // 使用统一的HttpClient单例，并添加拦截器
+        client = HttpClient.newBuilder()
                 .addInterceptor(chain -> {
                     Request original = chain.request();
                     Request request = original.newBuilder()
@@ -68,9 +66,13 @@ public class MarketApi {
         gson = new Gson();
     }
 
-    public static synchronized MarketApi getInstance() {
+    public static MarketApi getInstance() {
         if (instance == null) {
-            instance = new MarketApi();
+            synchronized (MarketApi.class) {
+                if (instance == null) {
+                    instance = new MarketApi();
+                }
+            }
         }
         return instance;
     }

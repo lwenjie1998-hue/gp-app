@@ -2,6 +2,8 @@ package com.gp.stockapp.api;
 
 import android.util.Log;
 
+import com.gp.stockapp.utils.HttpClient;
+
 import okhttp3.*;
 import org.json.JSONObject;
 import java.io.IOException;
@@ -15,28 +17,33 @@ import java.util.concurrent.TimeUnit;
  */
 public class GLM4Client {
     private static final String TAG = "GLM4Client";
-    private static GLM4Client instance;
+    private static volatile GLM4Client instance;
     
     private static final String API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
     
     // 双模型配置
-    private static final String MODEL_PREMIUM = "glm-5";     // 高精度模型：竞价推荐、尾盘推荐
+    private static final String MODEL_PREMIUM = "glm-4.7";     // 高精度模型：竞价推荐、尾盘推荐
     private static final String MODEL_STANDARD = "glm-4.7";  // 轻量模型：大盘分析、板块推荐、新闻推荐等
     
-    private OkHttpClient client;
-    private String apiKey = ""; // 需要设置API密钥
+    private final OkHttpClient client;
+    private volatile String apiKey = ""; // 需要设置API密钥
+    
+    // 重试配置
+    private static final int MAX_RETRY_COUNT = 2;
+    private static final long RETRY_DELAY_MS = 1000;
     
     private GLM4Client() {
-        client = new OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(160, TimeUnit.SECONDS)
-            .writeTimeout(120, TimeUnit.SECONDS)
-            .build();
+        // 使用统一的HttpClient单例（长时间超时版本）
+        client = HttpClient.getLongTimeoutInstance();
     }
     
-    public static synchronized GLM4Client getInstance() {
+    public static GLM4Client getInstance() {
         if (instance == null) {
-            instance = new GLM4Client();
+            synchronized (GLM4Client.class) {
+                if (instance == null) {
+                    instance = new GLM4Client();
+                }
+            }
         }
         return instance;
     }
@@ -55,7 +62,7 @@ public class GLM4Client {
      */
     public String analyzePremium(String prompt) {
         Log.d(TAG, "[Premium] Using model: " + MODEL_PREMIUM);
-        return doAnalyze(prompt, MODEL_PREMIUM);
+        return doAnalyzeWithRetry(prompt, MODEL_PREMIUM);
     }
 
     /**
@@ -64,7 +71,34 @@ public class GLM4Client {
      */
     public String analyze(String prompt) {
         Log.d(TAG, "[Standard] Using model: " + MODEL_STANDARD);
-        return doAnalyze(prompt, MODEL_STANDARD);
+        return doAnalyzeWithRetry(prompt, MODEL_STANDARD);
+    }
+    
+    /**
+     * 带重试机制的分析
+     */
+    private String doAnalyzeWithRetry(String prompt, String model) {
+        Exception lastException = null;
+        for (int i = 0; i <= MAX_RETRY_COUNT; i++) {
+            try {
+                String result = doAnalyze(prompt, model);
+                if (result != null && !result.isEmpty()) {
+                    return result;
+                }
+            } catch (Exception e) {
+                lastException = e;
+                Log.w(TAG, "API call attempt " + (i + 1) + " failed: " + e.getMessage());
+            }
+            
+            // 如果还有重试机会，等待后重试
+            if (i < MAX_RETRY_COUNT) {
+                try {
+                    Thread.sleep(RETRY_DELAY_MS * (i + 1));
+                } catch (InterruptedException ignored) {}
+            }
+        }
+        Log.e(TAG, "All retry attempts failed", lastException);
+        return null;
     }
 
     /**

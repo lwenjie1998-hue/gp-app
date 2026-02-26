@@ -30,30 +30,29 @@ public class HotStockApi {
 
     // ===== 东方财富数据接口 =====
 
-    // 龙虎榜 - 每日活跃营业部
-    // 返回字段: f2(收盘价) f3(涨跌幅) f6(成交额) f8(换手率) f12(代码) f14(名称) f20(总市值) f21(流通市值)
-    // 净买入相关: f22(上榜后1日涨幅) 等; 详细买卖用子接口
+    // 龙虎榜 - 东方财富龙虎榜列表接口（每日更新，16点后可查当天数据）
+    // 使用 push2.eastmoney.com 接口，返回JSON格式
     private static final String EASTMONEY_LHB_API =
-            "https://datacenter-web.eastmoney.com/api/data/v1/get" +
-            "?sortColumns=SECURITY_CODE&sortTypes=1&pageSize=50&pageNumber=1" +
-            "&reportName=RPT_DAILYBILLBOARD_DETAILSNEW" +
-            "&columns=SECURITY_CODE,SECURITY_NAME_ABBR,CHANGE_RATE,CLOSE_PRICE," +
-            "TURNOVERRATE,BILLBOARD_NET_AMT,BILLBOARD_BUY_AMT,BILLBOARD_SELL_AMT," +
-            "BILLBOARD_DEAL_AMT,EXPLANATION,DEAL_AMT,FREE_MARKET_CAP" +
-            "&filter=(TRADE_DATE='%s')&source=WEB&client=WEB";
+            "https://push2.eastmoney.com/api/qt/clist/get?" +
+            "fid=f184&po=1&pz=100&pn=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281" +
+            "&fs=m:1+t:2,m:1+t:23&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f124,f128,f136" +
+            "&rt=%d";  // 时间戳防缓存
 
     // 涨停板 - 涨停股池 (东方财富涨停板数据)
-    // f1=2: 涨停  f2=1: 沪深A股
+    // 使用 push2.eastmoney.com 接口，返回当天实时数据
     private static final String EASTMONEY_LIMIT_UP_API =
-            "https://push2ex.eastmoney.com/getTopicZTPool" +
-            "?ut=7eea3edcaed734bea9cb99f84f5d01d6&dpt=wz.ztzt&Ession=" +
-            "&date=%s&_=";
+            "https://push2.eastmoney.com/api/qt/clist/get?" +
+            "fid=f3&po=1&pz=100&pn=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281" +
+            "&fs=m:1+t:2,m:1+t:23&fields=f12,f14,f2,f3,f8,f128" +
+            "&rt=%d";
 
     // 连板股数据 (东方财富连板天梯)
+    // 使用 push2.eastmoney.com 接口，返回当天实时数据
     private static final String EASTMONEY_CONTINUOUS_LIMIT_API =
-            "https://push2ex.eastmoney.com/getTopicLBPool" +
-            "?ut=7eea3edcaed734bea9cb99f84f5d01d6&dpt=wz.ztzt&Ession=" +
-            "&date=%s&_=";
+            "https://push2.eastmoney.com/api/qt/clist/get?" +
+            "fid=f75&po=1&pz=100&pn=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281" +
+            "&fs=m:1+t:2,m:1+t:23&fields=f12,f14,f2,f3,f75,f8,f128" +
+            "&rt=%d";
 
     // 活跃股 - A股主板活跃股（按成交额降序排列, 取前30）
     // 仅主板(600xxx/000xxx)，排除创业板(300)、科创板(688)和北交所
@@ -135,16 +134,23 @@ public class HotStockApi {
     }
 
     /**
-     * 抓取龙虎榜数据（东方财富 datacenter-web）
+     * 抓取龙虎榜数据（东方财富 push2 API）
+     * 返回JSON格式
      */
     private List<HotStockData.DragonTigerItem> fetchDragonTigerList(String dateStr) throws IOException {
         List<HotStockData.DragonTigerItem> result = new ArrayList<>();
 
-        // dateStr格式转换: 20260223 -> 2026-02-23
-        String formattedDate = dateStr.substring(0, 4) + "-" + dateStr.substring(4, 6) + "-" + dateStr.substring(6, 8);
-        String url = String.format(EASTMONEY_LHB_API, formattedDate);
+        // 使用时间戳防缓存
+        String url = String.format(EASTMONEY_LHB_API, System.currentTimeMillis());
+        Log.d(TAG, "龙虎榜请求URL: " + url);
 
-        Request request = new Request.Builder().url(url).get().build();
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://data.eastmoney.com/")
+                .get()
+                .build();
+        
         Response response = client.newCall(request).execute();
 
         if (!response.isSuccessful() || response.body() == null) {
@@ -153,32 +159,53 @@ public class HotStockApi {
         }
 
         String body = response.body().string();
+        Log.d(TAG, "龙虎榜响应长度: " + body.length() + ", 前500字符: " + 
+                (body.length() > 500 ? body.substring(0, 500) : body));
+        
         try {
             JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-            if (!json.has("result") || json.get("result").isJsonNull()) {
-                Log.w(TAG, "龙虎榜无数据(可能非交易日或数据未更新)");
+            
+            // 检查data存在
+            if (!json.has("data") || json.get("data").isJsonNull()) {
+                Log.w(TAG, "龙虎榜无data数据(可能非交易日或数据未更新), dateStr=" + dateStr);
+                return result;
+            }
+            
+            JsonObject dataObj = json.getAsJsonObject("data");
+            if (!dataObj.has("diff") || dataObj.get("diff").isJsonNull()) {
+                Log.w(TAG, "龙虎榜无diff数组, dateStr=" + dateStr);
                 return result;
             }
 
-            JsonObject resultObj = json.getAsJsonObject("result");
-            JsonArray dataArr = resultObj.getAsJsonArray("data");
-            if (dataArr == null) return result;
+            JsonArray diffArr = dataObj.getAsJsonArray("diff");
+            if (diffArr == null || diffArr.size() == 0) {
+                Log.w(TAG, "龙虎榜diff数组为空, dateStr=" + dateStr);
+                return result;
+            }
+            Log.d(TAG, "龙虎榜diff数组长度: " + diffArr.size());
 
-            for (JsonElement elem : dataArr) {
+            for (JsonElement elem : diffArr) {
                 try {
                     JsonObject item = elem.getAsJsonObject();
                     HotStockData.DragonTigerItem lhb = new HotStockData.DragonTigerItem();
 
-                    lhb.setCode(getJsonString(item, "SECURITY_CODE"));
-                    lhb.setName(getJsonString(item, "SECURITY_NAME_ABBR"));
-                    lhb.setClose(getJsonDouble(item, "CLOSE_PRICE"));
-                    lhb.setChangePercent(getJsonDouble(item, "CHANGE_RATE"));
-                    lhb.setTurnoverRate(getJsonDouble(item, "TURNOVERRATE"));
-                    lhb.setNetBuy(getJsonDouble(item, "BILLBOARD_NET_AMT") / 10000.0); // 元->万
-                    lhb.setBuyAmount(getJsonDouble(item, "BILLBOARD_BUY_AMT") / 10000.0);
-                    lhb.setSellAmount(getJsonDouble(item, "BILLBOARD_SELL_AMT") / 10000.0);
-                    lhb.setReason(getJsonString(item, "EXPLANATION"));
-                    lhb.setMarketCap(getJsonDouble(item, "FREE_MARKET_CAP") / 100000000.0); // 元->亿
+                    // 新API字段映射
+                    lhb.setCode(getJsonString(item, "f12"));        // 代码
+                    lhb.setName(getJsonString(item, "f14"));        // 名称
+                    lhb.setClose(getJsonDouble(item, "f2"));        // 收盘价
+                    lhb.setChangePercent(getJsonDouble(item, "f3")); // 涨跌幅
+                    // 龙虎榜净买入(万) - f184是净买入额(元)
+                    lhb.setNetBuy(getJsonDouble(item, "f184") / 10000.0);
+                    // 买入总额 - f66是买入额
+                    lhb.setBuyAmount(getJsonDouble(item, "f66") / 10000.0);
+                    // 卖出总额 - f69是卖出额
+                    lhb.setSellAmount(getJsonDouble(item, "f69") / 10000.0);
+                    // 换手率 - f8
+                    lhb.setTurnoverRate(getJsonDouble(item, "f8"));
+                    // 流通市值 - f128
+                    lhb.setMarketCap(getJsonDouble(item, "f128") / 100000000.0); // 元->亿
+                    // 上榜原因 - 这个API没有提供
+                    lhb.setReason("");
 
                     // 仅保留主板(600xxx/000xxx)，过滤创业板/科创板/北交所，且涨幅<9%
                     String code = lhb.getCode();
@@ -189,9 +216,12 @@ public class HotStockApi {
                         result.add(lhb);
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "解析龙虎榜条目失败", e);
+                    Log.w(TAG, "解析龙虎榜条目失败: " + e.getMessage());
                 }
             }
+            
+            Log.d(TAG, "龙虎榜解析成功: " + result.size() + " 条");
+            
         } catch (Exception e) {
             Log.e(TAG, "解析龙虎榜JSON失败", e);
         }
@@ -200,12 +230,14 @@ public class HotStockApi {
     }
 
     /**
-     * 抓取涨停板数据（东方财富涨停股池）
+     * 抓取涨停板数据（东方财富 push2 API）
+     * 注意：返回当天实时数据
      */
     private List<HotStockData.LimitUpItem> fetchLimitUpList(String dateStr) throws IOException {
         List<HotStockData.LimitUpItem> result = new ArrayList<>();
 
-        String url = String.format(EASTMONEY_LIMIT_UP_API, dateStr) + System.currentTimeMillis();
+        String url = String.format(EASTMONEY_LIMIT_UP_API, System.currentTimeMillis());
+        Log.d(TAG, "涨停板请求URL: " + url);
         Request request = new Request.Builder().url(url).get().build();
         Response response = client.newCall(request).execute();
 
@@ -217,57 +249,38 @@ public class HotStockApi {
         String body = response.body().string();
         try {
             JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-            JsonObject data = json.getAsJsonObject("data");
-            if (data == null || !data.has("pool")) return result;
+            
+            // 检查data存在
+            if (!json.has("data") || json.get("data").isJsonNull()) return result;
+            JsonObject dataObj = json.getAsJsonObject("data");
+            if (!dataObj.has("diff") || dataObj.get("diff").isJsonNull()) return result;
 
-            JsonArray pool = data.getAsJsonArray("pool");
-            if (pool == null) return result;
+            JsonArray diffArr = dataObj.getAsJsonArray("diff");
+            if (diffArr == null) return result;
 
-            for (JsonElement elem : pool) {
+            for (JsonElement elem : diffArr) {
                 try {
                     JsonObject item = elem.getAsJsonObject();
-                    HotStockData.LimitUpItem lu = new HotStockData.LimitUpItem();
-
-                    String code = getJsonString(item, "c");    // 代码
-                    lu.setCode(code);
-                    lu.setName(getJsonString(item, "n"));      // 名称
-
-                    // 首次涨停时间
-                    String fbt = getJsonString(item, "fbt");
-                    if (fbt != null && fbt.length() == 6) {
-                        lu.setFirstLimitTime(fbt.substring(0, 2) + ":" + fbt.substring(2, 4) + ":" + fbt.substring(4, 6));
-                    }
-                    // 最后涨停时间
-                    String lbt = getJsonString(item, "lbt");
-                    if (lbt != null && lbt.length() == 6) {
-                        lu.setLastLimitTime(lbt.substring(0, 2) + ":" + lbt.substring(2, 4) + ":" + lbt.substring(4, 6));
-                    }
-
-                    lu.setOpenCount(getJsonInt(item, "oc"));   // 开板次数
-                    lu.setTurnoverRate(getJsonDouble(item, "tr") / 100.0); // 换手率(接口返回的是百分比*100)
-
-                    // 流通市值(元->亿)
-                    lu.setMarketCap(getJsonDouble(item, "ltsz") / 100000000.0);
-
-                    // 涨停类型判断
-                    double tr = lu.getTurnoverRate();
-                    int oc = lu.getOpenCount();
-                    if (tr < 1.0 && oc == 0) {
-                        lu.setLimitUpType("一字板");
-                    } else if (tr < 3.0 && oc == 0) {
-                        lu.setLimitUpType("T字板");
-                    } else {
-                        lu.setLimitUpType("换手板");
-                    }
-
-                    // 所属概念
-                    lu.setConcept(getJsonString(item, "hybk"));
-
-                    // 仅保留主板(600xxx/000xxx)，过滤创业板/科创板/北交所
-                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
-                            || code.startsWith("603") || code.startsWith("605") 
-                            || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))) {
-                        result.add(lu);
+                    
+                    String code = getJsonString(item, "f12");
+                    double changePercent = getJsonDouble(item, "f3");
+                    
+                    // 涨停判断：涨幅>=9.9%
+                    if (changePercent >= 9.9) {
+                        HotStockData.LimitUpItem lu = new HotStockData.LimitUpItem();
+                        lu.setCode(code);
+                        lu.setName(getJsonString(item, "f14"));
+                        lu.setTurnoverRate(getJsonDouble(item, "f8"));
+                        lu.setMarketCap(getJsonDouble(item, "f128") / 100000000.0);
+                        lu.setLimitUpType("涨停");
+                        lu.setConcept("");
+                        
+                        // 仅保留主板
+                        if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                                || code.startsWith("603") || code.startsWith("605") 
+                                || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))) {
+                            result.add(lu);
+                        }
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "解析涨停板条目失败", e);
@@ -281,12 +294,14 @@ public class HotStockApi {
     }
 
     /**
-     * 抓取连板股数据（东方财富连板天梯）
+     * 抓取连板股数据（东方财富 push2 API）
+     * 注意：返回当天实时数据
      */
     private List<HotStockData.ContinuousLimitItem> fetchContinuousLimitList(String dateStr) throws IOException {
         List<HotStockData.ContinuousLimitItem> result = new ArrayList<>();
 
-        String url = String.format(EASTMONEY_CONTINUOUS_LIMIT_API, dateStr) + System.currentTimeMillis();
+        String url = String.format(EASTMONEY_CONTINUOUS_LIMIT_API, System.currentTimeMillis());
+        Log.d(TAG, "连板股请求URL: " + url);
         Request request = new Request.Builder().url(url).get().build();
         Response response = client.newCall(request).execute();
 
@@ -298,27 +313,33 @@ public class HotStockApi {
         String body = response.body().string();
         try {
             JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-            JsonObject data = json.getAsJsonObject("data");
-            if (data == null || !data.has("pool")) return result;
+            
+            // 检查data存在
+            if (!json.has("data") || json.get("data").isJsonNull()) return result;
+            JsonObject dataObj = json.getAsJsonObject("data");
+            if (!dataObj.has("diff") || dataObj.get("diff").isJsonNull()) return result;
 
-            JsonArray pool = data.getAsJsonArray("pool");
-            if (pool == null) return result;
+            JsonArray diffArr = dataObj.getAsJsonArray("diff");
+            if (diffArr == null) return result;
 
-            for (JsonElement elem : pool) {
+            for (JsonElement elem : diffArr) {
                 try {
                     JsonObject item = elem.getAsJsonObject();
                     HotStockData.ContinuousLimitItem cl = new HotStockData.ContinuousLimitItem();
 
-                    String code = getJsonString(item, "c");
+                    String code = getJsonString(item, "f12");
                     cl.setCode(code);
-                    cl.setName(getJsonString(item, "n"));
-                    cl.setContinuousCount(getJsonInt(item, "ct"));    // 连板天数
-                    cl.setChangePercent(getJsonDouble(item, "zdp") / 100.0);
-                    cl.setTurnoverRate(getJsonDouble(item, "tr") / 100.0);
-                    cl.setMarketCap(getJsonDouble(item, "ltsz") / 100000000.0);
-                    cl.setConcept(getJsonString(item, "hybk"));
+                    cl.setName(getJsonString(item, "f14"));
+                    // f75是连板数
+                    cl.setContinuousCount(getJsonInt(item, "f75"));
+                    cl.setChangePercent(getJsonDouble(item, "f3"));
+                    cl.setTurnoverRate(getJsonDouble(item, "f8"));
+                    cl.setMarketCap(getJsonDouble(item, "f128") / 100000000.0);
+                    cl.setConcept("");
 
-                    if (code != null && (code.startsWith("600") || code.startsWith("601") 
+                    // 只保留连板数>=2的
+                    if (cl.getContinuousCount() >= 2 && code != null && 
+                            (code.startsWith("600") || code.startsWith("601") 
                             || code.startsWith("603") || code.startsWith("605") 
                             || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"))) {
                         result.add(cl);
@@ -352,8 +373,11 @@ public class HotStockApi {
         String body = response.body().string();
         try {
             JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            
+            // 健壮的null检查
+            if (!json.has("data") || !json.get("data").isJsonObject()) return result;
             JsonObject data = json.getAsJsonObject("data");
-            if (data == null || !data.has("diff")) return result;
+            if (!data.has("diff") || !data.get("diff").isJsonArray()) return result;
 
             JsonArray diff = data.getAsJsonArray("diff");
             if (diff == null) return result;

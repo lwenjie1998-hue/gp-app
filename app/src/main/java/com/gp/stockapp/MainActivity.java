@@ -288,12 +288,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onStopService(View view) {
-        stopService(new Intent(this, StockDataService.class));
-        stopService(new Intent(this, AIRecommendationService.class));
+        // 先停止前台服务
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopService(new Intent(this, StockDataService.class));
+            stopService(new Intent(this, AIRecommendationService.class));
+        } else {
+            stopService(new Intent(this, StockDataService.class));
+            stopService(new Intent(this, AIRecommendationService.class));
+        }
 
         isServiceRunning = false;
         updateServiceStatus(false);
         Toast.makeText(this, "监控已停止", Toast.LENGTH_SHORT).show();
+        Log.d(TAG, "用户停止监控服务");
     }
 
     private void updateServiceStatus(boolean running) {
@@ -331,13 +338,13 @@ public class MainActivity extends AppCompatActivity {
 
             switch (index.getIndexCode()) {
                 case MarketIndex.SH_INDEX:
-                    updateShIndex(index);
+                    updateIndexUI(tvShPoint, tvShChange, tvShPercent, tvShVolume, tvShRange, index);
                     break;
                 case MarketIndex.SZ_INDEX:
-                    updateSzIndex(index);
+                    updateIndexUI(tvSzPoint, tvSzChange, tvSzPercent, tvSzVolume, null, index);
                     break;
                 case MarketIndex.CY_INDEX:
-                    updateCyIndex(index);
+                    updateIndexUI(tvCyPoint, tvCyChange, tvCyPercent, tvCyVolume, null, index);
                     break;
             }
         }
@@ -347,10 +354,21 @@ public class MainActivity extends AppCompatActivity {
         tvLastUpdate.setText("更新: " + sdf.format(new Date()));
     }
 
-    private void updateShIndex(MarketIndex index) {
-        tvShPoint.setText(String.format(Locale.CHINA, "%.2f", index.getCurrentPoint()));
-        tvShChange.setText(index.getFormattedChangePoint());
-        tvShPercent.setText(index.getFormattedChangePercent());
+    /**
+     * 通用指数UI更新方法
+     * @param tvPoint 点位TextView
+     * @param tvChange 涨跌点数TextView
+     * @param tvPercent 涨跌幅TextView
+     * @param tvVolume 成交额TextView
+     * @param tvRange 振幅TextView（可为null）
+     * @param index 指数数据
+     */
+    private void updateIndexUI(TextView tvPoint, TextView tvChange, 
+                               TextView tvPercent, TextView tvVolume, 
+                               TextView tvRange, MarketIndex index) {
+        tvPoint.setText(String.format(Locale.CHINA, "%.2f", index.getCurrentPoint()));
+        tvChange.setText(index.getFormattedChangePoint());
+        tvPercent.setText(index.getFormattedChangePercent());
         
         // 成交额 + 放量/缩量标识
         String volumeText = "成交额: " + index.getFormattedAmount();
@@ -358,52 +376,17 @@ public class MainActivity extends AppCompatActivity {
         if (!volumeChange.isEmpty()) {
             volumeText += " (" + volumeChange + ")";
         }
-        tvShVolume.setText(volumeText);
+        tvVolume.setText(volumeText);
 
         int color = index.getChangeColor();
-        tvShChange.setTextColor(color);
-        tvShPercent.setTextColor(color);
-
-        if (index.getHigh() > 0 && index.getLow() > 0 && index.getPreClose() > 0) {
+        tvChange.setTextColor(color);
+        tvPercent.setTextColor(color);
+        
+        // 振幅（如果提供了TextView）
+        if (tvRange != null && index.getHigh() > 0 && index.getLow() > 0 && index.getPreClose() > 0) {
             double range = (index.getHigh() - index.getLow()) / index.getPreClose() * 100;
-            tvShRange.setText(String.format(Locale.CHINA, "振幅: %.2f%%", range));
+            tvRange.setText(String.format(Locale.CHINA, "振幅: %.2f%%", range));
         }
-    }
-
-    private void updateSzIndex(MarketIndex index) {
-        tvSzPoint.setText(String.format(Locale.CHINA, "%.2f", index.getCurrentPoint()));
-        tvSzChange.setText(index.getFormattedChangePoint());
-        tvSzPercent.setText(index.getFormattedChangePercent());
-        
-        // 成交额 + 放量/缩量标识
-        String volumeText = "成交额: " + index.getFormattedAmount();
-        String volumeChange = index.getVolumeChangeText();
-        if (!volumeChange.isEmpty()) {
-            volumeText += " (" + volumeChange + ")";
-        }
-        tvSzVolume.setText(volumeText);
-
-        int color = index.getChangeColor();
-        tvSzChange.setTextColor(color);
-        tvSzPercent.setTextColor(color);
-    }
-
-    private void updateCyIndex(MarketIndex index) {
-        tvCyPoint.setText(String.format(Locale.CHINA, "%.2f", index.getCurrentPoint()));
-        tvCyChange.setText(index.getFormattedChangePoint());
-        tvCyPercent.setText(index.getFormattedChangePercent());
-        
-        // 成交额 + 放量/缩量标识
-        String volumeText = "成交额: " + index.getFormattedAmount();
-        String volumeChange = index.getVolumeChangeText();
-        if (!volumeChange.isEmpty()) {
-            volumeText += " (" + volumeChange + ")";
-        }
-        tvCyVolume.setText(volumeText);
-
-        int color = index.getChangeColor();
-        tvCyChange.setTextColor(color);
-        tvCyPercent.setTextColor(color);
     }
 
     private void refreshAnalysis() {

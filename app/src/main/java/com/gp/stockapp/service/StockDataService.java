@@ -18,6 +18,11 @@ import com.gp.stockapp.R;
 import com.gp.stockapp.api.GLM4Client;
 import com.gp.stockapp.api.HotStockApi;
 import com.gp.stockapp.api.MarketApi;
+import com.gp.stockapp.db.AppDatabase;
+import com.gp.stockapp.db.ContinuousLimitDao;
+import com.gp.stockapp.db.ContinuousLimitEntity;
+import com.gp.stockapp.db.DragonTigerDao;
+import com.gp.stockapp.db.DragonTigerEntity;
 import com.gp.stockapp.model.HotStockData;
 import com.gp.stockapp.model.MarketIndex;
 import com.gp.stockapp.model.StockNews;
@@ -28,15 +33,17 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 大盘数据抓取服务
  * 循环抓取三大指数实时数据和市场新闻
+ * 
+ * 优化：使用 ScheduledExecutorService 替代 Timer，提高稳定性和性能
  */
 public class StockDataService extends Service {
     private static final String TAG = "StockDataService";
@@ -47,11 +54,13 @@ public class StockDataService extends Service {
     private StockRepository stockRepository;
     private MarketApi marketApi;
     private HotStockApi hotStockApi;
-    private ExecutorService executorService;
-    private Timer fetchTimer;
+    private AppDatabase appDatabase;
+    private DragonTigerDao dragonTigerDao;
+    private ContinuousLimitDao continuousLimitDao;
+    private ScheduledExecutorService scheduler;
     private long lastHotDataFetchTime = 0;
     private static final long HOT_DATA_FETCH_INTERVAL = 300000; // 热门数据5分钟抓取一次
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
 
     @Override
     public void onCreate() {
@@ -61,7 +70,11 @@ public class StockDataService extends Service {
         stockRepository = StockRepository.getInstance(getApplicationContext());
         marketApi = MarketApi.getInstance();
         hotStockApi = HotStockApi.getInstance();
-        executorService = Executors.newFixedThreadPool(2);
+        appDatabase = AppDatabase.getInstance(getApplicationContext());
+        dragonTigerDao = appDatabase.dragonTigerDao();
+        continuousLimitDao = appDatabase.continuousLimitDao();
+        // 使用单线程调度器，更稳定可靠
+        scheduler = Executors.newSingleThreadScheduledExecutor();
 
         createNotificationChannel();
     }
@@ -88,10 +101,31 @@ public class StockDataService extends Service {
     public void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "StockDataService destroyed");
+        
+        // 先停止数据抓取
         stopDataFetching();
-        if (executorService != null) {
-            executorService.shutdown();
+        
+        // 关闭调度器
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
+        
+        // 停止前台服务
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } else {
+            stopForeground(true);
+        }
+        
+        Log.d(TAG, "StockDataService stopped completely");
     }
 
     private void createNotificationChannel() {
@@ -130,28 +164,30 @@ public class StockDataService extends Service {
         if (isRunning) return;
 
         isRunning = true;
-        fetchTimer = new Timer();
 
-        // 立即执行一次
-        fetchMarketData();
-
-        // 定时执行
-        fetchTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
+        // 立即在后台线程执行一次（避免主线程网络操作）
+        scheduler.submit(() -> {
+            try {
                 fetchMarketData();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in initial fetch task", e);
             }
-        }, FETCH_INTERVAL, FETCH_INTERVAL);
+        });
+
+        // 使用 ScheduledExecutorService 定时执行
+        scheduler.scheduleAtFixedRate(() -> {
+            try {
+                fetchMarketData();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in scheduled fetch task", e);
+            }
+        }, FETCH_INTERVAL, FETCH_INTERVAL, TimeUnit.MILLISECONDS);
 
         Log.d(TAG, "Data fetching started, interval: " + FETCH_INTERVAL + "ms");
     }
 
     private void stopDataFetching() {
         isRunning = false;
-        if (fetchTimer != null) {
-            fetchTimer.cancel();
-            fetchTimer = null;
-        }
         Log.d(TAG, "Data fetching stopped");
     }
 
@@ -160,88 +196,131 @@ public class StockDataService extends Service {
      */
     private void fetchMarketData() {
         Log.d(TAG, "==== 开始执行定时数据抓取任务 ====");
-        executorService.execute(() -> {
-            try {
-                // 抓取三大指数数据
-                Log.d(TAG, "正在抓取大盘指数...");
-                List<MarketIndex> indices = marketApi.fetchMarketIndices();
-                if (indices != null && !indices.isEmpty()) {
-                    stockRepository.saveMarketIndices(indices);
+        // 直接在调度器线程中执行，无需额外的线程池
+        try {
+            // 抓取三大指数数据
+            Log.d(TAG, "正在抓取大盘指数...");
+            List<MarketIndex> indices = marketApi.fetchMarketIndices();
+            if (indices != null && !indices.isEmpty()) {
+                stockRepository.saveMarketIndices(indices);
 
-                    // 更新通知
-                    updateNotification(indices);
+                // 更新通知
+                updateNotification(indices);
 
-                    // 通知UI刷新
-                    sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
+                // 通知UI刷新
+                sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
 
-                    Log.d(TAG, "成功更新大盘指数: " + indices.size() + " 条记录");
-                } else {
-                    Log.w(TAG, "抓取大盘指数失败或列表为空");
-                }
+                Log.d(TAG, "成功更新大盘指数: " + indices.size() + " 条记录");
+            } else {
+                Log.w(TAG, "抓取大盘指数失败或列表为空");
+            }
 
-                // 抓取市场新闻
-                Log.d(TAG, "正在抓取市场要闻...");
-                List<StockNews> newsList = marketApi.fetchMarketNews();
-                if (newsList != null && !newsList.isEmpty()) {
-                    // 用AI为重大新闻推荐相关A股股票并标记重要性
-                    enrichNewsWithStockRecommendations(newsList);
-                    
-                    // 只保留AI判定为重大新闻的（importance >= 3）
-                    List<StockNews> majorNews = new ArrayList<>();
-                    for (StockNews news : newsList) {
-                        if (news.getImportance() >= 3) {
-                            majorNews.add(news);
-                        }
+            // 抓取市场新闻
+            Log.d(TAG, "正在抓取市场要闻...");
+            List<StockNews> newsList = marketApi.fetchMarketNews();
+            if (newsList != null && !newsList.isEmpty()) {
+                // 用AI为重大新闻推荐相关A股股票并标记重要性
+                enrichNewsWithStockRecommendations(newsList);
+                
+                // 只保留AI判定为重大新闻的（importance >= 3）
+                List<StockNews> majorNews = new ArrayList<>();
+                for (StockNews news : newsList) {
+                    if (news.getImportance() >= 3) {
+                        majorNews.add(news);
                     }
-                    Log.d(TAG, "AI筛选重大新闻: " + majorNews.size() + "/" + newsList.size() + " 条");
+                }
+                Log.d(TAG, "AI筛选重大新闻: " + majorNews.size() + "/" + newsList.size() + " 条");
+                
+                if (!majorNews.isEmpty()) {
+                    // 合并保存（新的在前，保留最多10条）
+                    stockRepository.mergeAndSaveNews(majorNews, 10);
+                    Log.d(TAG, "成功更新市场要闻: 筛选并保存了 " + majorNews.size() + " 条重大新闻");
+                } else {
+                    Log.d(TAG, "本次无重大新闻");
+                }
+            } else {
+                Log.w(TAG, "市场要闻抓取结果为空（可能所有源都失败了）");
+            }
+
+            // 抓取热门股票数据（龙虎榜、涨停板、连板股、活跃股）
+            // 每5分钟抓取一次，避免频繁请求
+            long now = System.currentTimeMillis();
+            if (now - lastHotDataFetchTime >= HOT_DATA_FETCH_INTERVAL) {
+                Log.d(TAG, "正在抓取热门股票数据（龙虎榜/涨停板/连板/活跃股）...");
+                try {
+                    // 当天数据（尾盘策略用）
+                    // 龙虎榜每天16点更新，16点前需要用前一天的日期
+                    Calendar cal = Calendar.getInstance();
+                    int hour = cal.get(Calendar.HOUR_OF_DAY);
+                    String todayStr = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.CHINA)
+                            .format(cal.getTime());
+                    String dateStr;
                     
-                    if (!majorNews.isEmpty()) {
-                        // 合并保存（新的在前，保留最多10条）
-                        stockRepository.mergeAndSaveNews(majorNews, 10);
-                        Log.d(TAG, "成功更新市场要闻: 筛选并保存了 " + majorNews.size() + " 条重大新闻");
+                    if (hour < 16) {
+                        // 16点前，龙虎榜数据还未更新，使用前一个交易日
+                        dateStr = TradingDayHelper.getPreviousTradingDayStr(cal.getTime());
+                        Log.d(TAG, "当前时间: " + hour + "点, 今日: " + todayStr + ", 龙虎榜日期: " + dateStr);
                     } else {
-                        Log.d(TAG, "本次无重大新闻");
+                        dateStr = todayStr;
+                        Log.d(TAG, "当前时间: " + hour + "点, 使用当日龙虎榜日期: " + dateStr);
                     }
-                } else {
-                    Log.w(TAG, "市场要闻抓取结果为空（可能所有源都失败了）");
-                }
-
-                // 抓取热门股票数据（龙虎榜、涨停板、连板股、活跃股）
-                // 每5分钟抓取一次，避免频繁请求
-                long now = System.currentTimeMillis();
-                if (now - lastHotDataFetchTime >= HOT_DATA_FETCH_INTERVAL) {
-                    Log.d(TAG, "正在抓取热门股票数据（龙虎榜/涨停板/连板/活跃股）...");
-                    try {
-                        // 当天数据（尾盘策略用）
-                        String dateStr = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.CHINA)
-                                .format(new java.util.Date());
-                        HotStockData hotData = hotStockApi.fetchAllHotData(dateStr);
-                        if (hotData != null) {
-                            stockRepository.saveHotStockData(hotData);
-                            Log.d(TAG, "成功更新当天热门股票数据");
-                        }
-                        
-                        // 前一个交易日数据（竞价策略用）
-                        String prevDateStr = TradingDayHelper.getPreviousTradingDayStr(new java.util.Date());
-                        if (prevDateStr != null && !prevDateStr.isEmpty()) {
-                            HotStockData prevHotData = hotStockApi.fetchAllHotData(prevDateStr);
-                            if (prevHotData != null) {
-                                stockRepository.savePrevDayHotStockData(prevHotData);
-                                Log.d(TAG, "成功更新前一交易日热门股票数据: " + prevDateStr);
+                    
+                    HotStockData hotData = hotStockApi.fetchAllHotData(dateStr);
+                    
+                    // 如果当天数据为空，尝试往前找有数据的日子
+                    if (hotData == null || (hotData.getDragonTigerList() != null && hotData.getDragonTigerList().isEmpty())) {
+                        Log.w(TAG, "龙虎榜数据为空，尝试查找更早的交易日...");
+                        for (int i = 0; i < 5; i++) {  // 最多往前找5天
+                            String olderDate = TradingDayHelper.getPreviousTradingDayStr(
+                                    TradingDayHelper.parseDate(dateStr));
+                            if (olderDate != null && !olderDate.isEmpty()) {
+                                Log.d(TAG, "尝试日期: " + olderDate);
+                                HotStockData olderData = hotStockApi.fetchAllHotData(olderDate);
+                                if (olderData != null && olderData.getDragonTigerList() != null 
+                                        && !olderData.getDragonTigerList().isEmpty()) {
+                                    hotData = olderData;
+                                    dateStr = olderDate;
+                                    Log.d(TAG, "找到有效龙虎榜数据: " + olderDate);
+                                    break;
+                                }
+                                dateStr = olderDate;
                             }
                         }
-                        
-                        lastHotDataFetchTime = now;
-                    } catch (Exception e) {
-                        Log.e(TAG, "抓取热门股票数据失败", e);
                     }
+                    
+                    if (hotData != null) {
+                        stockRepository.saveHotStockData(hotData);
+                        // 保存龙虎榜和连板股数据到数据库
+                        saveDragonTigerToDatabase(hotData, dateStr);
+                        saveContinuousLimitToDatabase(hotData, dateStr);
+                        Log.d(TAG, "成功更新当天热门股票数据, 龙虎榜: " + 
+                                (hotData.getDragonTigerList() != null ? hotData.getDragonTigerList().size() : 0) + " 条");
+                    }
+                    
+                    // 前一个交易日数据（竞价策略用）
+                    String prevDateStr = TradingDayHelper.getPreviousTradingDayStr(
+                            TradingDayHelper.parseDate(dateStr));
+                    if (prevDateStr != null && !prevDateStr.isEmpty()) {
+                        HotStockData prevHotData = hotStockApi.fetchAllHotData(prevDateStr);
+                        if (prevHotData != null) {
+                            stockRepository.savePrevDayHotStockData(prevHotData);
+                            // 同时保存前一日的龙虎榜和连板股到数据库
+                            saveDragonTigerToDatabase(prevHotData, prevDateStr);
+                            saveContinuousLimitToDatabase(prevHotData, prevDateStr);
+                            Log.d(TAG, "成功更新前一交易日热门股票数据: " + prevDateStr);
+                        }
+                    }
+                    
+                    lastHotDataFetchTime = now;
+                } catch (Exception e) {
+                    Log.e(TAG, "抓取热门股票数据失败", e);
                 }
-
-                Log.d(TAG, "==== 定时数据抓取任务完成 ====");
-            } catch (Exception e) {
-                Log.e(TAG, "定时抓取大盘数据时发生严重错误", e);
             }
-        });
+
+            Log.d(TAG, "==== 定时数据抓取任务完成 ====");
+        } catch (Exception e) {
+            Log.e(TAG, "定时抓取大盘数据时发生严重错误", e);
+        }
     }
 
     /**
@@ -364,6 +443,77 @@ public class StockDataService extends Service {
             Log.d(TAG, "成功为 " + appliedCount + " 条重大新闻添加了股票推荐");
         } catch (Exception e) {
             Log.e(TAG, "解析AI新闻推荐结果出错: " + response, e);
+        }
+    }
+
+    /**
+     * 保存龙虎榜数据到数据库
+     */
+    private void saveDragonTigerToDatabase(HotStockData hotData, String tradeDate) {
+        if (hotData == null || hotData.getDragonTigerList() == null || hotData.getDragonTigerList().isEmpty()) {
+            Log.d(TAG, "龙虎榜数据为空，跳过保存");
+            return;
+        }
+        
+        try {
+            List<DragonTigerEntity> entities = new ArrayList<>();
+            long fetchTime = System.currentTimeMillis();
+            
+            for (HotStockData.DragonTigerItem item : hotData.getDragonTigerList()) {
+                DragonTigerEntity entity = new DragonTigerEntity();
+                entity.setTradeDate(tradeDate);
+                entity.setCode(item.getCode());
+                entity.setName(item.getName());
+                entity.setClosePrice(item.getClose());
+                entity.setChangePercent(item.getChangePercent());
+                entity.setTurnoverRate(item.getTurnoverRate());
+                entity.setNetBuy(item.getNetBuy());
+                entity.setBuyAmount(item.getBuyAmount());
+                entity.setSellAmount(item.getSellAmount());
+                entity.setReason(item.getReason());
+                entity.setMarketCap(item.getMarketCap());
+                entity.setFetchTime(fetchTime);
+                entities.add(entity);
+            }
+            
+            dragonTigerDao.insertAll(entities);
+            Log.d(TAG, "成功保存龙虎榜历史数据: " + tradeDate + " 共 " + entities.size() + " 条");
+        } catch (Exception e) {
+            Log.e(TAG, "保存龙虎榜历史数据失败", e);
+        }
+    }
+
+    /**
+     * 保存连板股数据到数据库
+     */
+    private void saveContinuousLimitToDatabase(HotStockData hotData, String tradeDate) {
+        if (hotData == null || hotData.getContinuousLimitList() == null || hotData.getContinuousLimitList().isEmpty()) {
+            Log.d(TAG, "连板股数据为空，跳过保存");
+            return;
+        }
+        
+        try {
+            List<ContinuousLimitEntity> entities = new ArrayList<>();
+            long fetchTime = System.currentTimeMillis();
+            
+            for (HotStockData.ContinuousLimitItem item : hotData.getContinuousLimitList()) {
+                ContinuousLimitEntity entity = new ContinuousLimitEntity();
+                entity.setTradeDate(tradeDate);
+                entity.setCode(item.getCode());
+                entity.setName(item.getName());
+                entity.setContinuousCount(item.getContinuousCount());
+                entity.setChangePercent(item.getChangePercent());
+                entity.setTurnoverRate(item.getTurnoverRate());
+                entity.setMarketCap(item.getMarketCap());
+                entity.setConcept(item.getConcept());
+                entity.setFetchTime(fetchTime);
+                entities.add(entity);
+            }
+            
+            continuousLimitDao.insertAll(entities);
+            Log.d(TAG, "成功保存连板股历史数据: " + tradeDate + " 共 " + entities.size() + " 条");
+        } catch (Exception e) {
+            Log.e(TAG, "保存连板股历史数据失败", e);
         }
     }
 

@@ -31,14 +31,15 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * AI大盘分析服务
  * 使用GLM-4模型分析大盘走势，生成市场研判
+ * 
+ * 优化：使用 ScheduledExecutorService 替代 Timer，提高稳定性和性能
  */
 public class AIRecommendationService extends Service {
     private static final String TAG = "AIAnalysisService";
@@ -55,10 +56,8 @@ public class AIRecommendationService extends Service {
     private StockRepository stockRepository;
     private GLM4Client glm4Client;
     private PromptLoader promptLoader;
-    private ExecutorService executorService;
-    private Timer analysisTimer;
-    private Timer strategyTimer;
-    private boolean isRunning = false;
+    private ScheduledExecutorService scheduler;
+    private volatile boolean isRunning = false;
     
     // 策略执行标志位 - 确保每天只自动执行一次（仅针对竞价和尾盘）
     private boolean auctionExecutedToday = false;
@@ -73,7 +72,8 @@ public class AIRecommendationService extends Service {
         stockRepository = StockRepository.getInstance(getApplicationContext());
         glm4Client = GLM4Client.getInstance();
         promptLoader = new PromptLoader(getApplicationContext());
-        executorService = Executors.newSingleThreadExecutor();
+        // 使用双线程调度器：一个用于分析，一个用于策略
+        scheduler = Executors.newScheduledThreadPool(2);
 
         createNotificationChannel();
     }
@@ -113,10 +113,31 @@ public class AIRecommendationService extends Service {
     public void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "AIAnalysisService destroyed");
+        
+        // 先停止分析
         stopAnalysis();
-        if (executorService != null) {
-            executorService.shutdown();
+        
+        // 关闭调度器
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
+        
+        // 停止前台服务
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } else {
+            stopForeground(true);
+        }
+        
+        Log.d(TAG, "AIAnalysisService stopped completely");
     }
 
     private void createNotificationChannel() {
@@ -155,38 +176,30 @@ public class AIRecommendationService extends Service {
         if (isRunning) return;
 
         isRunning = true;
-        analysisTimer = new Timer();
-        strategyTimer = new Timer();
 
         // 延迟10秒后首次分析（等待数据就绪）
-        analysisTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
+        scheduler.scheduleWithFixedDelay(() -> {
+            try {
                 analyzeMarket();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in market analysis task", e);
             }
-        }, 10000, ANALYSIS_INTERVAL);
+        }, 10, ANALYSIS_INTERVAL / 1000, TimeUnit.SECONDS);
 
         // 延迟20秒后首次策略分析
-        strategyTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
+        scheduler.scheduleWithFixedDelay(() -> {
+            try {
                 analyzeStrategies();
+            } catch (Exception e) {
+                Log.e(TAG, "Error in strategy analysis task", e);
             }
-        }, 20000, STRATEGY_INTERVAL);
+        }, 20, STRATEGY_INTERVAL / 1000, TimeUnit.SECONDS);
 
         Log.d(TAG, "Analysis started, interval: " + ANALYSIS_INTERVAL + "ms, strategy: " + STRATEGY_INTERVAL + "ms");
     }
 
     private void stopAnalysis() {
         isRunning = false;
-        if (analysisTimer != null) {
-            analysisTimer.cancel();
-            analysisTimer = null;
-        }
-        if (strategyTimer != null) {
-            strategyTimer.cancel();
-            strategyTimer = null;
-        }
         Log.d(TAG, "Analysis stopped");
     }
 
@@ -196,52 +209,50 @@ public class AIRecommendationService extends Service {
     private void analyzeMarket() {
         Log.d(TAG, "Analyzing market...");
 
-        executorService.execute(() -> {
-            try {
-                // 获取最新指数数据
-                List<MarketIndex> indices = stockRepository.getMarketIndices();
-                List<StockNews> newsList = stockRepository.getLatestNews(10);
+        try {
+            // 获取最新指数数据
+            List<MarketIndex> indices = stockRepository.getMarketIndices();
+            List<StockNews> newsList = stockRepository.getLatestNews(10);
 
-                if (indices == null || indices.isEmpty()) {
-                    Log.d(TAG, "No market data to analyze");
-                    return;
-                }
-
-                // 加载提示词模板
-                String promptTemplate = promptLoader.loadMarketAnalysisPrompt();
-                if (promptTemplate == null || promptTemplate.isEmpty()) {
-                    promptTemplate = getDefaultPrompt();
-                }
-
-                // 构建分析输入
-                String analysisInput = buildAnalysisInput(indices, newsList, promptTemplate);
-
-                // 调用GLM-4进行分析
-                String response = glm4Client.analyze(analysisInput);
-
-                if (response != null && !response.isEmpty()) {
-                    // 解析分析结果
-                    MarketAnalysis analysis = parseAnalysis(response);
-                    if (analysis != null) {
-                        analysis.setTimestamp(System.currentTimeMillis());
-                        stockRepository.saveMarketAnalysis(analysis);
-
-                        // 通知UI更新
-                        sendBroadcast(MainActivity.ACTION_ANALYSIS_UPDATED);
-
-                        // 重要分析发送通知
-                        if (analysis.getConfidence() >= 80) {
-                            sendAnalysisNotification(analysis);
-                        }
-
-                        Log.d(TAG, "Market analysis completed: " + analysis.getSentimentText());
-                    }
-                }
-
-            } catch (Exception e) {
-                Log.e(TAG, "Error analyzing market", e);
+            if (indices == null || indices.isEmpty()) {
+                Log.d(TAG, "No market data to analyze");
+                return;
             }
-        });
+
+            // 加载提示词模板
+            String promptTemplate = promptLoader.loadMarketAnalysisPrompt();
+            if (promptTemplate == null || promptTemplate.isEmpty()) {
+                promptTemplate = getDefaultPrompt();
+            }
+
+            // 构建分析输入
+            String analysisInput = buildAnalysisInput(indices, newsList, promptTemplate);
+
+            // 调用GLM-4进行分析
+            String response = glm4Client.analyze(analysisInput);
+
+            if (response != null && !response.isEmpty()) {
+                // 解析分析结果
+                MarketAnalysis analysis = parseAnalysis(response);
+                if (analysis != null) {
+                    analysis.setTimestamp(System.currentTimeMillis());
+                    stockRepository.saveMarketAnalysis(analysis);
+
+                    // 通知UI更新
+                    sendBroadcast(MainActivity.ACTION_ANALYSIS_UPDATED);
+
+                    // 重要分析发送通知
+                    if (analysis.getConfidence() >= 80) {
+                        sendAnalysisNotification(analysis);
+                    }
+
+                    Log.d(TAG, "Market analysis completed: " + analysis.getSentimentText());
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error analyzing market", e);
+        }
     }
 
     /**
@@ -376,56 +387,54 @@ public class AIRecommendationService extends Service {
     private void analyzeStrategies() {
         Log.d(TAG, "Analyzing strategies...");
 
-        executorService.execute(() -> {
-            try {
-                List<MarketIndex> indices = stockRepository.getMarketIndices();
-                List<StockNews> newsList = stockRepository.getLatestNews(10);
+        try {
+            List<MarketIndex> indices = stockRepository.getMarketIndices();
+            List<StockNews> newsList = stockRepository.getLatestNews(10);
 
-                if (indices == null || indices.isEmpty()) {
-                    Log.d(TAG, "No market data for strategy analysis");
-                    return;
-                }
-
-                Calendar cal = Calendar.getInstance();
-                int hour = cal.get(Calendar.HOUR_OF_DAY);
-                int minute = cal.get(Calendar.MINUTE);
-                
-                // 检查日期，如果是新的一天，重置执行标志
-                String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
-                if (!today.equals(lastExecutionDate)) {
-                    lastExecutionDate = today;
-                    auctionExecutedToday = false;
-                    closingExecutedToday = false;
-                    Log.d(TAG, "New trading day, reset execution flags");
-                }
-
-                // 板块推荐 - 9:25之后每5分钟自动执行
-                if ((hour == 9 && minute >= 25) || (hour >= 10)) {
-                    analyzeSectorStrategy(indices, newsList);
-                }
-
-                // 开盘竞价推荐 - 只在9:25之后执行，且每天只自动执行一次
-                if ((hour == 9 && minute >= 25) || (hour >= 10)) {
-                    if (!auctionExecutedToday) {
-                        analyzeAuctionStrategy(indices, newsList);
-                        auctionExecutedToday = true;
-                        Log.d(TAG, "Auction strategy executed for today");
-                    }
-                }
-
-                // 尾盘推荐 - 只在14:50之后执行，且每天只自动执行一次
-                if ((hour == 14 && minute >= 50) || hour >= 15) {
-                    if (!closingExecutedToday) {
-                        analyzeClosingStrategy(indices, newsList);
-                        closingExecutedToday = true;
-                        Log.d(TAG, "Closing strategy executed for today");
-                    }
-                }
-
-            } catch (Exception e) {
-                Log.e(TAG, "Error analyzing strategies", e);
+            if (indices == null || indices.isEmpty()) {
+                Log.d(TAG, "No market data for strategy analysis");
+                return;
             }
-        });
+
+            Calendar cal = Calendar.getInstance();
+            int hour = cal.get(Calendar.HOUR_OF_DAY);
+            int minute = cal.get(Calendar.MINUTE);
+            
+            // 检查日期，如果是新的一天，重置执行标志
+            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
+            if (!today.equals(lastExecutionDate)) {
+                lastExecutionDate = today;
+                auctionExecutedToday = false;
+                closingExecutedToday = false;
+                Log.d(TAG, "New trading day, reset execution flags");
+            }
+
+            // 板块推荐 - 9:25之后每5分钟自动执行
+            if ((hour == 9 && minute >= 25) || (hour >= 10)) {
+                analyzeSectorStrategy(indices, newsList);
+            }
+
+            // 开盘竞价推荐 - 只在9:25之后执行，且每天只自动执行一次
+            if ((hour == 9 && minute >= 25) || (hour >= 10)) {
+                if (!auctionExecutedToday) {
+                    analyzeAuctionStrategy(indices, newsList);
+                    auctionExecutedToday = true;
+                    Log.d(TAG, "Auction strategy executed for today");
+                }
+            }
+
+            // 尾盘推荐 - 只在14:50之后执行，且每天只自动执行一次
+            if ((hour == 14 && minute >= 50) || hour >= 15) {
+                if (!closingExecutedToday) {
+                    analyzeClosingStrategy(indices, newsList);
+                    closingExecutedToday = true;
+                    Log.d(TAG, "Closing strategy executed for today");
+                }
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error analyzing strategies", e);
+        }
     }
 
     /**
@@ -443,28 +452,63 @@ public class AIRecommendationService extends Service {
         sb.append(buildMarketDataText(indices, newsList));
         
         if ("closing".equals(strategyType)) {
-            // ===== 尾盘策略：聚焦大盘走势、板块轮动、国际国内局势、主力资金和技术指标 =====
-            Log.d(TAG, "尾盘策略: 聚焦大盘走势+板块分析+宏观局势+技术指标");
+            // ===== 尾盘策略：大盘走势+龙虎榜+连板股+板块轮动+国际国内局势+技术指标 =====
+            Log.d(TAG, "尾盘策略: 聚焦大盘走势+龙虎榜+连板股+板块分析+宏观局势+技术指标");
             
-            // 只提供活跃股数据（用于板块分析和主力资金判断），不提供龙虎榜等个股热点数据
+            // 尾盘推荐应该参考当天的龙虎榜和连板股数据，因为这些数据能反映：
+            // 1. 龙虎榜：当天游资/机构的操作方向，次日可能延续
+            // 2. 连板股：市场高度和板块强度，判断情绪周期
             HotStockData hotData = stockRepository.getHotStockData();
-            if (hotData != null && hotData.getTopGainers() != null && !hotData.getTopGainers().isEmpty()) {
-                sb.append("\n## 当日主板活跃股数据（按成交额排序）\n\n");
-                sb.append("以下是今日成交最活跃的主板股票，请用于分析板块资金流向和主力动向：\n\n");
-                for (HotStockData.TopGainerItem item : hotData.getTopGainers()) {
-                    sb.append("- ").append(item.toString()).append("\n");
+            if (hotData != null) {
+                // 龙虎榜数据 - 判断游资动向和次日机会
+                if (hotData.getDragonTigerList() != null && !hotData.getDragonTigerList().isEmpty()) {
+                    sb.append("\n## 当日龙虎榜数据（重要参考）\n\n");
+                    sb.append("以下是今日龙虎榜数据，反映游资/机构的操作方向，对次日走势有重要参考价值：\n\n");
+                    for (HotStockData.DragonTigerItem item : hotData.getDragonTigerList()) {
+                        sb.append("- ").append(item.toString()).append("\n");
+                    }
+                    sb.append("\n**龙虎榜分析要点**：\n");
+                    sb.append("- 净买入额大的标的说明游资/机构看好，次日可能延续强势\n");
+                    sb.append("- 注意游资席位的操作风格（赵老哥/炒股养家/章盟主等知名游资）\n");
+                    sb.append("- 结合流通市值判断游资介入程度（30-120亿最佳）\n");
+                    sb.append("- 龙虎榜标的如果尾盘没有涨停，可作为次日关注对象\n\n");
                 }
-                sb.append("\n**分析要点**：从以上活跃股中提取板块信息和资金流向，结合大盘走势和国际国内局势，");
-                sb.append("筛选尾盘处于技术支撑位附近、所在板块具有持续性的中小市值标的（流通市值30-120亿）。\n");
+                
+                // 连板股数据 - 判断板块强度和市场高度
+                if (hotData.getContinuousLimitList() != null && !hotData.getContinuousLimitList().isEmpty()) {
+                    sb.append("## 当日连板股数据（板块强度指标）\n\n");
+                    sb.append("以下是今日连板股数据，反映市场高度和板块强度：\n\n");
+                    for (HotStockData.ContinuousLimitItem item : hotData.getContinuousLimitList()) {
+                        sb.append("- ").append(item.toString()).append("\n");
+                    }
+                    sb.append("\n**连板股分析要点**：\n");
+                    sb.append("- 连板股数量和高度反映市场赚钱效应和情绪周期\n");
+                    sb.append("- 连板股所在板块是当前最强主线，次日可能延续\n");
+                    sb.append("- 连板股龙头若开板，板块可能进入分化，谨慎追高\n");
+                    sb.append("- 从连板股所在板块中寻找低位补涨标的\n\n");
+                }
+                
+                // 活跃股数据 - 板块资金流向
+                if (hotData.getTopGainers() != null && !hotData.getTopGainers().isEmpty()) {
+                    sb.append("## 当日主板活跃股数据（资金流向）\n\n");
+                    sb.append("以下是今日成交最活跃的主板股票，用于分析板块资金流向：\n\n");
+                    for (HotStockData.TopGainerItem item : hotData.getTopGainers()) {
+                        sb.append("- ").append(item.toString()).append("\n");
+                    }
+                    sb.append("\n**活跃股分析要点**：\n");
+                    sb.append("- 成交额集中度反映主力资金主攻方向\n");
+                    sb.append("- 结合龙虎榜判断是否有游资/机构介入\n\n");
+                }
             }
             
-            sb.append("\n## 分析重点提示\n\n");
-            sb.append("请重点从以下维度分析：\n");
-            sb.append("1. 大盘全天走势形态和尾盘趋势\n");
-            sb.append("2. 板块资金轮动方向和明日预判\n");
-            sb.append("3. 新闻中的国际国内局势对A股的影响\n");
-            sb.append("4. 主力资金流入方向和成交量变化\n");
-            sb.append("5. 推荐标的的技术面信号（均线支撑/MACD/KDJ/RSI等）\n");
+            sb.append("## 分析重点提示\n\n");
+            sb.append("请综合以下维度进行尾盘推荐（优先级从高到低）：\n");
+            sb.append("1. **龙虎榜游资动向**：当日龙虎榜中净买入额大、游资介入深的标的，次日溢价预期强\n");
+            sb.append("2. **连板股板块强度**：连板股所在板块是当前主线，从中寻找补涨机会\n");
+            sb.append("3. **大盘全天走势**：走势形态、量价配合、尾盘趋势\n");
+            sb.append("4. **板块资金轮动**：从活跃股中判断资金流向，预判明日轮动方向\n");
+            sb.append("5. **国际国内局势**：新闻中的宏观因素对A股的影响\n");
+            sb.append("6. **技术指标验证**：推荐标的需有技术支撑（均线/MACD/KDJ/RSI等）\n");
             
         } else if ("open_auction".equals(strategyType)) {
             // ===== 竞价策略：昨日龙虎榜+热搜榜+技术指标+集合竞价 =====
@@ -596,7 +640,7 @@ public class AIRecommendationService extends Service {
      */
     public void forceAnalyzeAuctionStrategy() {
         Log.d(TAG, "Force analyzing auction strategy...");
-        executorService.execute(() -> {
+        scheduler.submit(() -> {
             try {
                 List<MarketIndex> indices = stockRepository.getMarketIndices();
                 List<StockNews> newsList = stockRepository.getLatestNews(10);
@@ -614,7 +658,7 @@ public class AIRecommendationService extends Service {
      */
     public void forceAnalyzeClosingStrategy() {
         Log.d(TAG, "Force analyzing closing strategy...");
-        executorService.execute(() -> {
+        scheduler.submit(() -> {
             try {
                 List<MarketIndex> indices = stockRepository.getMarketIndices();
                 List<StockNews> newsList = stockRepository.getLatestNews(10);
@@ -632,7 +676,7 @@ public class AIRecommendationService extends Service {
      */
     public void forceAnalyzeSectorStrategy() {
         Log.d(TAG, "Force analyzing sector strategy...");
-        executorService.execute(() -> {
+        scheduler.submit(() -> {
             try {
                 List<MarketIndex> indices = stockRepository.getMarketIndices();
                 List<StockNews> newsList = stockRepository.getLatestNews(10);
