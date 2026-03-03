@@ -19,10 +19,10 @@ public class GLM4Client {
     private static final String TAG = "GLM4Client";
     private static volatile GLM4Client instance;
     
-    private static final String API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+    private static final String API_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions";
     
     // 双模型配置
-    private static final String MODEL_PREMIUM = "glm-4.7";     // 高精度模型：竞价推荐、尾盘推荐
+    private static final String MODEL_PREMIUM = "glm-5";     // 高精度模型：竞价推荐、尾盘推荐
     private static final String MODEL_STANDARD = "glm-4.7";  // 轻量模型：大盘分析、板块推荐、新闻推荐等
     
     private final OkHttpClient client;
