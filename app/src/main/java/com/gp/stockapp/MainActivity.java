@@ -38,6 +38,7 @@ import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.service.StockDataService;
 import com.gp.stockapp.service.AIRecommendationService;
+import com.gp.stockapp.utils.TradingDayHelper;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -135,8 +136,16 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        menu.add(0, 1, 0, "设置").setIcon(android.R.drawable.ic_menu_preferences)
+        // 同步历史图标（时钟形状）
+        menu.add(0, 2, 0, "历史数据")
+                .setIcon(R.drawable.ic_toolbar_history)
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
+                
+        // 设置图标（齿轮形状）
+        menu.add(0, 1, 0, "设置")
+                .setIcon(R.drawable.ic_toolbar_settings)
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
+                
         return true;
     }
 
@@ -145,8 +154,91 @@ public class MainActivity extends AppCompatActivity {
         if (item.getItemId() == 1) {
             showSettingsDialog();
             return true;
+        } else if (item.getItemId() == 2) {
+            showSyncHistoryDialog();
+            return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void showSyncHistoryDialog() {
+        new Thread(() -> {
+            List<String> dtDates = stockRepository.getAllDragonTigerDates();
+            List<String> clDates = stockRepository.getAllContinuousLimitDates();
+            List<String> allTradingDays = TradingDayHelper.getRecentTradingDayStrings(7);
+            
+            runOnUiThread(() -> {
+                android.widget.ScrollView scrollView = new android.widget.ScrollView(this);
+                LinearLayout container = new LinearLayout(this);
+                container.setOrientation(LinearLayout.VERTICAL);
+                
+                int padding = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20, getResources().getDisplayMetrics());
+                container.setPadding(padding, padding / 2, padding, padding);
+                
+                for (String date : allTradingDays) {
+                    boolean hasDT = dtDates.contains(date);
+                    boolean hasCL = clDates.contains(date);
+                    
+                    // 行容器
+                    LinearLayout row = new LinearLayout(this);
+                    row.setOrientation(LinearLayout.HORIZONTAL);
+                    row.setGravity(Gravity.CENTER_VERTICAL);
+                    int rowPadding = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 12, getResources().getDisplayMetrics());
+                    row.setPadding(0, rowPadding, 0, rowPadding);
+
+                    // 日期文本
+                    TextView tvDate = new TextView(this);
+                    tvDate.setText(date);
+                    tvDate.setTextSize(16);
+                    tvDate.setTextColor(android.graphics.Color.parseColor("#333333"));
+                    tvDate.setTypeface(null, Typeface.BOLD);
+                    LinearLayout.LayoutParams lpDate = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
+                    row.addView(tvDate, lpDate);
+
+                    // 状态徽章标签
+                    TextView tvStatus = new TextView(this);
+                    tvStatus.setTextSize(12);
+                    int badgeHPadding = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, getResources().getDisplayMetrics());
+                    int badgeVPadding = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 4, getResources().getDisplayMetrics());
+                    tvStatus.setPadding(badgeHPadding, badgeVPadding, badgeHPadding, badgeVPadding);
+                    
+                    GradientDrawable bg = new GradientDrawable();
+                    bg.setCornerRadius(Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 12, getResources().getDisplayMetrics())));
+                    
+                    if (hasDT && hasCL) {
+                        tvStatus.setText("✓ 已同步");
+                        tvStatus.setTextColor(android.graphics.Color.parseColor("#2E7D32")); // 深绿
+                        bg.setColor(android.graphics.Color.parseColor("#E8F5E9")); // 浅绿底
+                    } else if (hasDT || hasCL) {
+                        tvStatus.setText("! 部分同步 (" + (hasDT ? "龙虎榜" : "连板") + ")");
+                        tvStatus.setTextColor(android.graphics.Color.parseColor("#EF6C00")); // 深橙
+                        bg.setColor(android.graphics.Color.parseColor("#FFF3E0")); // 浅橙底
+                    } else {
+                        tvStatus.setText("× 未同步");
+                        tvStatus.setTextColor(android.graphics.Color.parseColor("#C62828")); // 深红
+                        bg.setColor(android.graphics.Color.parseColor("#FFEBEE")); // 浅红底
+                    }
+                    tvStatus.setBackground(bg);
+                    row.addView(tvStatus);
+                    
+                    container.addView(row);
+
+                    // 分割线
+                    View divider = new View(this);
+                    divider.setBackgroundColor(android.graphics.Color.parseColor("#EEEEEE"));
+                    container.addView(divider, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2));
+                }
+                
+                scrollView.addView(container);
+
+                new AlertDialog.Builder(this)
+                        .setTitle("近7日数据同步状态")
+                        .setView(scrollView)
+                        .setPositiveButton("完成", null)
+                        .setNeutralButton("自动补全历史", (dialog, which) -> triggerHistorySync())
+                        .show();
+            });
+        }).start();
     }
 
     private void initViews() {
