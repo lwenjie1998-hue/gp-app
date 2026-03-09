@@ -10,8 +10,6 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -40,7 +38,6 @@ import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.service.StockDataService;
 import com.gp.stockapp.service.AIRecommendationService;
-import com.gp.stockapp.utils.StockAppHelper;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -74,11 +71,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvStatus, tvLastUpdate;
     private View statusIndicator;
     // 按钮
-    private Button btnStartService;
+    private Button btnStartService, btnSyncHistory;
 
     private StockRepository stockRepository;
     private GLM4Client glm4Client;
-    private Handler refreshHandler;
     private boolean isDetailExpanded = false;
     private boolean isServiceRunning = false;
 
@@ -107,6 +103,13 @@ public class MainActivity extends AppCompatActivity {
                 refreshAnalysis();
             } else if (ACTION_STRATEGY_UPDATED.equals(intent.getAction())) {
                 refreshStrategyRecommendations();
+            } else if (StockDataService.ACTION_HISTORY_SYNC_STATUS.equals(intent.getAction())) {
+                boolean running = intent.getBooleanExtra(StockDataService.EXTRA_HISTORY_SYNC_RUNNING, false);
+                String message = intent.getStringExtra(StockDataService.EXTRA_HISTORY_SYNC_MESSAGE);
+                updateHistorySyncButtonState(running);
+                if (message != null && !message.isEmpty()) {
+                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show();
+                }
             }
         }
     };
@@ -214,6 +217,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 按钮
         btnStartService = findViewById(R.id.btn_start_service);
+        btnSyncHistory = findViewById(R.id.btn_sync_history);
 
         btnStartService.setOnClickListener(v -> {
             if (isServiceRunning) {
@@ -223,6 +227,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        btnSyncHistory.setOnClickListener(v -> triggerHistorySync());
+
         // 详情展开/收起
         tvToggleDetail.setOnClickListener(v -> toggleAnalysisDetail());
     }
@@ -230,7 +236,6 @@ public class MainActivity extends AppCompatActivity {
     private void initData() {
         stockRepository = StockRepository.getInstance(this);
         glm4Client = GLM4Client.getInstance();
-        refreshHandler = new Handler(Looper.getMainLooper());
 
         // 加载API密钥
         String apiKey = getApiKey();
@@ -324,6 +329,32 @@ public class MainActivity extends AppCompatActivity {
             btnStartService.setText("开始监控");
             btnStartService.setBackgroundResource(R.drawable.btn_primary);
             btnStartService.setTextColor(0xFFFFFFFF);
+        }
+    }
+
+    private void updateHistorySyncButtonState(boolean syncing) {
+        if (btnSyncHistory == null) {
+            return;
+        }
+        btnSyncHistory.setEnabled(!syncing);
+        btnSyncHistory.setText(syncing ? "更新中..." : "更新数据");
+        if (syncing) {
+            btnSyncHistory.setBackgroundResource(R.drawable.btn_outline);
+            btnSyncHistory.setTextColor(0xFF999999);
+        } else {
+            btnSyncHistory.setBackgroundResource(R.drawable.btn_outline);
+            btnSyncHistory.setTextColor(0xFF666666);
+        }
+    }
+
+    private void triggerHistorySync() {
+        updateHistorySyncButtonState(true);
+        Intent intent = new Intent(this, StockDataService.class);
+        intent.setAction(StockDataService.ACTION_SYNC_HISTORY);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
         }
     }
 
@@ -576,7 +607,7 @@ public class MainActivity extends AppCompatActivity {
         StrategyRecommendation rec = stockRepository.getAuctionRecommendation();
         if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) {
             tvAuctionList.setVisibility(View.VISIBLE);
-            tvAuctionList.setText("等待AI分析...");
+            tvAuctionList.setText("暂无竞价推荐，进入详情页下拉可手动生成");
             layoutAuctionItems.setVisibility(View.GONE);
             tvAuctionMore.setVisibility(View.GONE);
             return;
@@ -592,7 +623,7 @@ public class MainActivity extends AppCompatActivity {
         StrategyRecommendation rec = stockRepository.getClosingRecommendation();
         if (rec == null || rec.getItems() == null || rec.getItems().isEmpty()) {
             tvClosingList.setVisibility(View.VISIBLE);
-            tvClosingList.setText("等待AI分析...");
+            tvClosingList.setText("暂无尾盘推荐，进入详情页下拉可手动生成");
             layoutClosingItems.setVisibility(View.GONE);
             tvClosingMore.setVisibility(View.GONE);
             return;
@@ -819,6 +850,7 @@ public class MainActivity extends AppCompatActivity {
         filter.addAction(ACTION_DATA_UPDATED);
         filter.addAction(ACTION_ANALYSIS_UPDATED);
         filter.addAction(ACTION_STRATEGY_UPDATED);
+        filter.addAction(StockDataService.ACTION_HISTORY_SYNC_STATUS);
         LocalBroadcastManager.getInstance(this).registerReceiver(dataReceiver, filter);
 
         // 刷新数据
@@ -837,8 +869,5 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (refreshHandler != null) {
-            refreshHandler.removeCallbacksAndMessages(null);
-        }
     }
 }

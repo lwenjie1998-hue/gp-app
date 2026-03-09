@@ -9,8 +9,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -62,6 +66,17 @@ public class HotStockApi {
             "&fltt=2&invt=2&fid=f6&fs=m:0+t:6,m:1+t:2" +
             "&fields=f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21" +
             "&_=";
+
+        private static final String EASTMONEY_HISTORY_LHB_API =
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_BILLBOARD_DAILYDETAILS" +
+            "&columns=ALL&source=WEB&client=WEB&pageNumber=1&pageSize=500" +
+            "&sortColumns=BILLBOARD_NET_AMT,SECURITY_CODE&sortTypes=-1,1&filter=(TRADE_DATE='%s')";
+
+        private static final String EASTMONEY_HISTORY_LIMIT_UP_POOL_API =
+            "https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989" +
+            "&dpt=wz.ztzt&Pageindex=0&pagesize=200&sort=fbt:asc&date=%s&_=%d";
+
+        private static final SimpleDateFormat API_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA);
 
     private HotStockApi() {
         client = new OkHttpClient.Builder()
@@ -128,6 +143,28 @@ public class HotStockApi {
             Log.d(TAG, "涨幅榜抓取成功: " + (gainers != null ? gainers.size() : 0) + " 条");
         } catch (Exception e) {
             Log.e(TAG, "涨幅榜抓取失败", e);
+        }
+
+        return data;
+    }
+
+    /**
+     * 抓取历史数据库补齐数据（仅龙虎榜、连板股）
+     */
+    public HotStockData fetchHistoricalDatabaseData(String dateStr) {
+        HotStockData data = new HotStockData();
+        data.setTimestamp(System.currentTimeMillis());
+
+        try {
+            data.setDragonTigerList(fetchHistoricalDragonTigerList(dateStr));
+        } catch (Exception e) {
+            Log.e(TAG, "历史龙虎榜抓取失败: " + dateStr, e);
+        }
+
+        try {
+            data.setContinuousLimitList(fetchHistoricalContinuousLimitList(dateStr));
+        } catch (Exception e) {
+            Log.e(TAG, "历史连板股抓取失败: " + dateStr, e);
         }
 
         return data;
@@ -415,7 +452,176 @@ public class HotStockApi {
         return result;
     }
 
+    private List<HotStockData.DragonTigerItem> fetchHistoricalDragonTigerList(String dateStr) throws IOException {
+        List<HotStockData.DragonTigerItem> result = new ArrayList<>();
+        String apiDate = toEastMoneyTradeDate(dateStr);
+        String url = String.format(Locale.US, EASTMONEY_HISTORY_LHB_API, apiDate);
+
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://data.eastmoney.com/")
+                .get()
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                Log.w(TAG, "历史龙虎榜请求失败: " + response.code() + ", date=" + dateStr);
+                return result;
+            }
+
+            String body = response.body().string();
+            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            if (!json.has("result") || json.get("result").isJsonNull()) {
+                return result;
+            }
+
+            JsonObject resultObj = json.getAsJsonObject("result");
+            if (!resultObj.has("data") || resultObj.get("data").isJsonNull()) {
+                return result;
+            }
+
+            JsonArray dataArray = resultObj.getAsJsonArray("data");
+            if (dataArray == null) {
+                return result;
+            }
+
+            for (JsonElement element : dataArray) {
+                try {
+                    JsonObject item = element.getAsJsonObject();
+                    HotStockData.DragonTigerItem lhb = new HotStockData.DragonTigerItem();
+                    String code = getJsonStringByKeys(item, "SECURITY_CODE", "SECURITYCODE", "TRADE_CODE");
+                    lhb.setCode(code);
+                    lhb.setName(getJsonStringByKeys(item, "SECURITY_NAME_ABBR", "SECURITY_NAME", "SECU_NAME"));
+                    lhb.setClose(getJsonDoubleByKeys(item, "CLOSE_PRICE", "CLOSEPRICE"));
+                    lhb.setChangePercent(getJsonDoubleByKeys(item, "CHANGE_RATE", "CHANGE_PERCENT"));
+                    lhb.setTurnoverRate(getJsonDoubleByKeys(item, "TURNOVERRATE", "TURNOVER_RATE"));
+                    lhb.setNetBuy(getJsonDoubleByKeys(item, "BILLBOARD_NET_AMT", "NET_BUY_AMT") / 10000.0);
+                    lhb.setBuyAmount(getJsonDoubleByKeys(item, "BILLBOARD_BUY_AMT", "BUY_AMT") / 10000.0);
+                    lhb.setSellAmount(getJsonDoubleByKeys(item, "BILLBOARD_SELL_AMT", "SELL_AMT") / 10000.0);
+                    lhb.setReason(getJsonStringByKeys(item, "EXPLANATION", "EXPLAIN", "BILLBOARD_REASON"));
+                    lhb.setMarketCap(getJsonDoubleByKeys(item, "FREE_MARKET_CAP", "FREE_MARKET_VALUE") / 100000000.0);
+
+                    if (isMainBoardCode(code)) {
+                        result.add(lhb);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "解析历史龙虎榜条目失败: " + dateStr, e);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<HotStockData.ContinuousLimitItem> fetchHistoricalContinuousLimitList(String dateStr) throws IOException {
+        List<HotStockData.ContinuousLimitItem> result = new ArrayList<>();
+        String url = String.format(Locale.US, EASTMONEY_HISTORY_LIMIT_UP_POOL_API, dateStr, System.currentTimeMillis());
+
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Referer", "https://data.eastmoney.com/")
+                .get()
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                Log.w(TAG, "历史连板股请求失败: " + response.code() + ", date=" + dateStr);
+                return result;
+            }
+
+            String body = response.body().string();
+            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            if (!json.has("data") || json.get("data").isJsonNull()) {
+                return result;
+            }
+
+            JsonObject dataObj = json.getAsJsonObject("data");
+            if (!dataObj.has("pool") || dataObj.get("pool").isJsonNull()) {
+                return result;
+            }
+
+            JsonArray pool = dataObj.getAsJsonArray("pool");
+            if (pool == null) {
+                return result;
+            }
+
+            for (JsonElement element : pool) {
+                try {
+                    JsonObject item = element.getAsJsonObject();
+                    HotStockData.ContinuousLimitItem cl = new HotStockData.ContinuousLimitItem();
+                    String code = getJsonStringByKeys(item, "c", "code");
+                    cl.setCode(code);
+                    cl.setName(getJsonStringByKeys(item, "n", "name"));
+                    cl.setChangePercent(getJsonDoubleByKeys(item, "zdp", "changePercent"));
+                    cl.setTurnoverRate(getJsonDoubleByKeys(item, "hs", "turnoverRate"));
+                    cl.setMarketCap(getJsonDoubleByKeys(item, "ltsz", "marketCap") / 100000000.0);
+                    cl.setConcept(getJsonStringByKeys(item, "hybk", "gn", "concept"));
+
+                    int continuousCount = getJsonIntByKeys(item, "lbc", "continuousCount");
+                    if (continuousCount <= 0 && item.has("zttj") && item.get("zttj").isJsonObject()) {
+                        JsonObject zttj = item.getAsJsonObject("zttj");
+                        continuousCount = getJsonIntByKeys(zttj, "ct", "days");
+                    }
+                    cl.setContinuousCount(continuousCount);
+
+                    if (continuousCount >= 2 && isMainBoardCode(code)) {
+                        result.add(cl);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "解析历史连板股条目失败: " + dateStr, e);
+                }
+            }
+        }
+
+        return result;
+    }
+
     // ===== JSON工具方法 =====
+
+    private String getJsonStringByKeys(JsonObject obj, String... keys) {
+        for (String key : keys) {
+            String value = getJsonString(obj, key);
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private double getJsonDoubleByKeys(JsonObject obj, String... keys) {
+        for (String key : keys) {
+            if (obj.has(key) && !obj.get(key).isJsonNull()) {
+                return getJsonDouble(obj, key);
+            }
+        }
+        return 0.0;
+    }
+
+    private int getJsonIntByKeys(JsonObject obj, String... keys) {
+        for (String key : keys) {
+            if (obj.has(key) && !obj.get(key).isJsonNull()) {
+                return getJsonInt(obj, key);
+            }
+        }
+        return 0;
+    }
+
+    private boolean isMainBoardCode(String code) {
+        return code != null && (code.startsWith("600") || code.startsWith("601")
+                || code.startsWith("603") || code.startsWith("605")
+                || code.startsWith("000") || code.startsWith("001") || code.startsWith("002"));
+    }
+
+    private String toEastMoneyTradeDate(String dateStr) {
+        try {
+            Date date = new SimpleDateFormat("yyyyMMdd", Locale.CHINA).parse(dateStr);
+            return API_DATE_FORMAT.format(date);
+        } catch (ParseException e) {
+            return dateStr;
+        }
+    }
 
     private String getJsonString(JsonObject obj, String key) {
         if (obj.has(key) && !obj.get(key).isJsonNull()) {

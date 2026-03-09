@@ -25,12 +25,9 @@ import com.gp.stockapp.model.StrategyRecommendation;
 import com.gp.stockapp.repository.StockRepository;
 import com.gp.stockapp.utils.PromptLoader;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -59,11 +56,6 @@ public class AIRecommendationService extends Service {
     private ScheduledExecutorService scheduler;
     private volatile boolean isRunning = false;
     
-    // 策略执行标志位 - 确保每天只自动执行一次（仅针对竞价和尾盘）
-    private boolean auctionExecutedToday = false;
-    private boolean closingExecutedToday = false;
-    private String lastExecutionDate = "";
-
     @Override
     public void onCreate() {
         super.onCreate();
@@ -400,37 +392,12 @@ public class AIRecommendationService extends Service {
             int hour = cal.get(Calendar.HOUR_OF_DAY);
             int minute = cal.get(Calendar.MINUTE);
             
-            // 检查日期，如果是新的一天，重置执行标志
-            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(new Date());
-            if (!today.equals(lastExecutionDate)) {
-                lastExecutionDate = today;
-                auctionExecutedToday = false;
-                closingExecutedToday = false;
-                Log.d(TAG, "New trading day, reset execution flags");
-            }
-
             // 板块推荐 - 9:25之后每5分钟自动执行
             if ((hour == 9 && minute >= 25) || (hour >= 10)) {
                 analyzeSectorStrategy(indices, newsList);
             }
 
-            // 开盘竞价推荐 - 只在9:25之后执行，且每天只自动执行一次
-            if ((hour == 9 && minute >= 25) || (hour >= 10)) {
-                if (!auctionExecutedToday) {
-                    analyzeAuctionStrategy(indices, newsList);
-                    auctionExecutedToday = true;
-                    Log.d(TAG, "Auction strategy executed for today");
-                }
-            }
-
-            // 尾盘推荐 - 只在14:50之后执行，且每天只自动执行一次
-            if ((hour == 14 && minute >= 50) || hour >= 15) {
-                if (!closingExecutedToday) {
-                    analyzeClosingStrategy(indices, newsList);
-                    closingExecutedToday = true;
-                    Log.d(TAG, "Closing strategy executed for today");
-                }
-            }
+            Log.d(TAG, "Auction and closing strategies are manual only");
 
         } catch (Exception e) {
             Log.e(TAG, "Error analyzing strategies", e);
@@ -460,18 +427,17 @@ public class AIRecommendationService extends Service {
             // 2. 连板股：市场高度和板块强度，判断情绪周期
             HotStockData hotData = stockRepository.getHotStockData();
             if (hotData != null) {
-                // 龙虎榜数据 - 判断游资动向和次日机会
+                // 龙虎榜数据 - 仅作辅助确认，不作为尾盘首要依据
                 if (hotData.getDragonTigerList() != null && !hotData.getDragonTigerList().isEmpty()) {
-                    sb.append("\n## 当日龙虎榜数据（重要参考）\n\n");
-                    sb.append("以下是今日龙虎榜数据，反映游资/机构的操作方向，对次日走势有重要参考价值：\n\n");
+                    sb.append("\n## 当日龙虎榜数据（辅助参考）\n\n");
+                    sb.append("以下是今日龙虎榜数据，可用于辅助确认个股是否有资金关注，但不要将其作为尾盘推荐的首要依据：\n\n");
                     for (HotStockData.DragonTigerItem item : hotData.getDragonTigerList()) {
                         sb.append("- ").append(item.toString()).append("\n");
                     }
-                    sb.append("\n**龙虎榜分析要点**：\n");
-                    sb.append("- 净买入额大的标的说明游资/机构看好，次日可能延续强势\n");
-                    sb.append("- 注意游资席位的操作风格（赵老哥/炒股养家/章盟主等知名游资）\n");
-                    sb.append("- 结合流通市值判断游资介入程度（30-120亿最佳）\n");
-                    sb.append("- 龙虎榜标的如果尾盘没有涨停，可作为次日关注对象\n\n");
+                    sb.append("\n**龙虎榜使用原则**：\n");
+                    sb.append("- 仅在当日走势、板块轮动、新闻催化已经成立时，作为辅助加分项\n");
+                    sb.append("- 不要因为净买入额大，就忽略尾盘转弱、冲高回落或承接不足\n");
+                    sb.append("- 结合流通市值和尾盘承接质量判断资金有效性\n\n");
                 }
                 
                 // 连板股数据 - 判断板块强度和市场高度
@@ -503,12 +469,11 @@ public class AIRecommendationService extends Service {
             
             sb.append("## 分析重点提示\n\n");
             sb.append("请综合以下维度进行尾盘推荐（优先级从高到低）：\n");
-            sb.append("1. **龙虎榜游资动向**：当日龙虎榜中净买入额大、游资介入深的标的，次日溢价预期强\n");
-            sb.append("2. **连板股板块强度**：连板股所在板块是当前主线，从中寻找补涨机会\n");
-            sb.append("3. **大盘全天走势**：走势形态、量价配合、尾盘趋势\n");
-            sb.append("4. **板块资金轮动**：从活跃股中判断资金流向，预判明日轮动方向\n");
-            sb.append("5. **国际国内局势**：新闻中的宏观因素对A股的影响\n");
-            sb.append("6. **技术指标验证**：推荐标的需有技术支撑（均线/MACD/KDJ/RSI等）\n");
+            sb.append("1. **大盘全天走势**：走势形态、量价配合、尾盘承接和情绪变化\n");
+            sb.append("2. **板块资金轮动**：从活跃股和板块强弱判断明日可能延续的方向\n");
+            sb.append("3. **市场新闻与政策催化**：优先考虑当天有明确催化、且逻辑顺畅的方向\n");
+            sb.append("4. **技术指标验证**：推荐标的需有技术支撑（均线/MACD/KDJ/RSI等）\n");
+            sb.append("5. **龙虎榜与连板股辅助确认**：仅用于验证资金关注度和板块强度，不得喧宾夺主\n");
             
         } else if ("open_auction".equals(strategyType)) {
             // ===== 竞价策略：昨日龙虎榜+热搜榜+技术指标+集合竞价 =====
@@ -899,33 +864,34 @@ public class AIRecommendationService extends Service {
                 "**分析维度（自上而下，必须涵盖）：**\n" +
                 "1. 大盘走势：全天走势形态、量价配合、尾盘趋势、技术位\n" +
                 "2. 板块轮动：领涨/领跌板块、资金流向、明日轮动预判\n" +
-                "3. 国际国内局势：外盘影响、政策动向、地缘因素\n" +
-                "4. 主力资金+技术指标：均线支撑/MACD/KDJ/RSI/成交量变化\n" +
-                "综合评分 = 大盘环境(25%) + 板块趋势(25%) + 技术面信号(20%) + 宏观因素(15%) + 隔夜风控(15%)\n\n" +
+            "3. 市场新闻与国际国内局势：外盘影响、政策动向、地缘因素、当日新闻催化\n" +
+            "4. 主力资金+技术指标：均线支撑/MACD/KDJ/RSI/成交量变化\n" +
+            "5. 龙虎榜与连板股：仅作辅助确认，不作为首要推荐依据\n" +
+            "综合评分 = 大盘环境(30%) + 板块趋势(25%) + 新闻催化(20%) + 技术面信号(15%) + 隔夜风控(10%)\n\n" +
                 "请输出JSON格式，包含以下字段：\n" +
                 "{\n" +
                 "  \"title\": \"尾盘推荐\",\n" +
-                "  \"summary\": \"尾盘策略概述(50字内，含大盘走势+板块方向)\",\n" +
+            "  \"summary\": \"尾盘策略概述(50字内，含大盘走势+板块方向+新闻催化)\",\n" +
                 "  \"confidence\": 0-100,\n" +
                 "  \"risk_level\": \"low/medium/high\",\n" +
                 "  \"items\": [\n" +
                 "    {\n" +
                 "      \"name\": \"股票名称\",\n" +
                 "      \"code\": \"股票代码(6位数字)\",\n" +
-                "      \"reason\": \"推荐理由(30字内，引用板块走势+技术指标)\",\n" +
-                "      \"highlight\": \"核心亮点(如:板块龙头回调/主力资金流入/技术超卖)\",\n" +
+            "      \"reason\": \"推荐理由(30字内，优先引用当日走势/新闻催化/板块/技术指标)\",\n" +
+            "      \"highlight\": \"核心亮点(如:板块龙头回调/新闻催化/主力资金流入/技术超卖)\",\n" +
                 "      \"score\": 0-100,\n" +
                 "      \"entry_timing\": \"买入时间和价格策略\",\n" +
                 "      \"stop_loss\": \"止损位(基于技术支撑位)\",\n" +
                 "      \"next_day_plan\": \"次日操作预案(高开/平开/低开怎么做)\",\n" +
-                "      \"tags\": [\"板块轮动\", \"技术支撑\", \"主力资金\", \"低吸\"]\n" +
+            "      \"tags\": [\"板块轮动\", \"新闻催化\", \"技术支撑\", \"主力资金\", \"低吸\"]\n" +
                 "    }\n" +
                 "  ],\n" +
                 "  \"market_sentiment\": \"全天市场情绪总结(冰点/修复/高潮/分化/退潮)\",\n" +
-                "  \"main_line\": \"今日最强板块方向及明日轮动预判\",\n" +
+            "  \"main_line\": \"今日最强板块方向及明日轮动预判(结合走势、资金和新闻分析)\",\n" +
                 "  \"overnight_risk\": \"隔夜风险评估(外盘/国际局势/政策面/周末效应)\",\n" +
                 "  \"strategy_note\": \"尾盘风控纪律(单只最多3成仓，隔夜亏损不超3%)\",\n" +
-                "  \"analysis_text\": \"详细分析(含大盘复盘+板块分析+国际国内局势+技术面)\"\n" +
+            "  \"analysis_text\": \"详细分析(含大盘复盘+板块分析+新闻催化+国际国内局势+技术面，龙虎榜仅作辅助说明)\"\n" +
                 "}\n\n" +
                 "只推荐5只股票，隔夜持仓次日择机卖出，必须给出止损位和次日操作预案。\n" +
                 "**重要：只推荐主板股票（600xxx/000xxx），不要推荐创业板/科创板/港股/美股，不要推荐已涨停或接近涨停的股票**";

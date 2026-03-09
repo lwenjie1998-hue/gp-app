@@ -2,10 +2,12 @@ package com.gp.stockapp.utils;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -139,6 +141,23 @@ public class TradingDayHelper {
     public static String getLatestTradingDayStr() {
         Date day = getLatestTradingDay();
         return day != null ? SDF.format(day) : "";
+    }
+
+    /**
+     * 获取最近N个交易日字符串（含最近交易日）
+     */
+    public static List<String> getRecentTradingDayStrings(int count) {
+        List<String> tradingDays = new ArrayList<>();
+        if (count <= 0) {
+            return tradingDays;
+        }
+
+        Date cursor = getLatestTradingDay();
+        while (cursor != null && tradingDays.size() < count) {
+            tradingDays.add(SDF.format(cursor));
+            cursor = getPreviousTradingDay(cursor);
+        }
+        return tradingDays;
     }
 
     /**

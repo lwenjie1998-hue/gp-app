@@ -169,12 +169,24 @@ public class RecommendationActivity extends AppCompatActivity {
         layoutContent.removeAllViews();
         
         TextView tvEmpty = new TextView(this);
-        tvEmpty.setText("暂无推荐数据");
+        tvEmpty.setText(getEmptyMessage());
         tvEmpty.setTextColor(0xFF666666);
         tvEmpty.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         tvEmpty.setGravity(Gravity.CENTER);
         tvEmpty.setPadding(0, dpToPx(40), 0, 0);
         layoutContent.addView(tvEmpty);
+    }
+
+    private String getEmptyMessage() {
+        switch (recommendationType) {
+            case "auction":
+                return "暂无竞价推荐，下拉可手动生成";
+            case "closing":
+                return "暂无尾盘推荐，下拉可手动生成";
+            case "sector":
+            default:
+                return "暂无推荐数据";
+        }
     }
 
     private void displayRecommendation(StrategyRecommendation rec) {

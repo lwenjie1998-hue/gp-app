@@ -146,44 +146,48 @@ public class StockRepository {
      * 3. prevAmount 始终为上一个交易日的最终成交额
      */
     public void saveMarketIndices(List<MarketIndex> indices) {
+        String lastSavedTradingDay = preferences.getString(KEY_LAST_TRADING_DATE, "");
+        String currentTradingDay = TradingDayHelper.getLatestTradingDayStr();
+        Map<String, Double> prevDayAmounts = getPrevDayAmounts();
+
+        if (!currentTradingDay.equals(lastSavedTradingDay) && !lastSavedTradingDay.isEmpty()) {
+            List<MarketIndex> lastIndices = getStoredMarketIndicesInternal();
+            for (MarketIndex lastIndex : lastIndices) {
+                if (lastIndex.getIndexCode() != null && lastIndex.getAmount() > 0) {
+                    prevDayAmounts.put(lastIndex.getIndexCode(), lastIndex.getAmount());
+                }
+            }
+            savePrevDayAmounts(prevDayAmounts);
+            Log.d(TAG, "Trading day changed: " + lastSavedTradingDay + " -> " + currentTradingDay
+                    + ", saved prev amounts: " + prevDayAmounts);
+        }
+
+        List<MarketIndex> updatedIndices = new ArrayList<>(indices);
+        for (MarketIndex newIndex : updatedIndices) {
+            if (newIndex.getIndexCode() != null && prevDayAmounts.containsKey(newIndex.getIndexCode())) {
+                newIndex.setPrevAmount(prevDayAmounts.get(newIndex.getIndexCode()));
+            }
+        }
+
+        indicesCache = new ArrayList<>(updatedIndices);
+        indicesCacheTime = System.currentTimeMillis();
+
         executorService.execute(() -> {
-            String lastSavedTradingDay = preferences.getString(KEY_LAST_TRADING_DATE, "");
-            
-            // 确定当前数据属于哪个交易日
-            // 非交易日（周末/节假日）API返回的数据仍然是最后一个交易日的
-            String currentTradingDay = TradingDayHelper.getLatestTradingDayStr();
-            
-            // 获取存储的前一交易日成交额
-            Map<String, Double> prevDayAmounts = getPrevDayAmounts();
-            
-            if (!currentTradingDay.equals(lastSavedTradingDay) && !lastSavedTradingDay.isEmpty()) {
-                // 交易日变化了 → 把上一个交易日的成交额存为"前日成交额"
-                List<MarketIndex> lastIndices = getMarketIndices();
-                for (MarketIndex lastIndex : lastIndices) {
-                    if (lastIndex.getIndexCode() != null && lastIndex.getAmount() > 0) {
-                        prevDayAmounts.put(lastIndex.getIndexCode(), lastIndex.getAmount());
-                    }
-                }
-                savePrevDayAmounts(prevDayAmounts);
-                Log.d(TAG, "Trading day changed: " + lastSavedTradingDay + " -> " + currentTradingDay 
-                        + ", saved prev amounts: " + prevDayAmounts);
-            }
-            
-            // 为新数据设置前日成交额（用于放量/缩量显示）
-            for (MarketIndex newIndex : indices) {
-                if (newIndex.getIndexCode() != null && prevDayAmounts.containsKey(newIndex.getIndexCode())) {
-                    newIndex.setPrevAmount(prevDayAmounts.get(newIndex.getIndexCode()));
-                }
-            }
-            
             // 保存当前数据和交易日标记
-            String json = gson.toJson(indices);
+            String json = gson.toJson(updatedIndices);
             preferences.edit()
                     .putString(KEY_INDICES, json)
                     .putString(KEY_LAST_TRADING_DATE, currentTradingDay)
                     .apply();
-            Log.d(TAG, "Saved " + indices.size() + " market indices for trading day: " + currentTradingDay);
+            Log.d(TAG, "Saved " + updatedIndices.size() + " market indices for trading day: " + currentTradingDay);
         });
+    }
+
+    private List<MarketIndex> getStoredMarketIndicesInternal() {
+        String json = preferences.getString(KEY_INDICES, "[]");
+        Type type = new TypeToken<List<MarketIndex>>() {}.getType();
+        List<MarketIndex> list = gson.fromJson(json, type);
+        return list != null ? list : new ArrayList<>();
     }
 
     /**
@@ -505,44 +509,36 @@ public class StockRepository {
      * @param maxCount 最大保留条数
      */
     public void mergeAndSaveNews(List<StockNews> newNewsList, int maxCount) {
-        // 更新内存缓存
-        newsCache = null; // 清除缓存，强制重新加载
-        
+        List<StockNews> existingNews = getAllNewsInternal();
+
+        List<StockNews> merged = new ArrayList<>(newNewsList);
+
+        java.util.Set<String> newTitles = new java.util.HashSet<>();
+        for (StockNews news : newNewsList) {
+            if (news.getTitle() != null) {
+                newTitles.add(news.getTitle().trim());
+            }
+        }
+        for (StockNews oldNews : existingNews) {
+            if (oldNews.getTitle() != null && !newTitles.contains(oldNews.getTitle().trim())) {
+                merged.add(oldNews);
+            }
+        }
+
+        merged.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
+
+        if (merged.size() > maxCount) {
+            merged = new ArrayList<>(merged.subList(0, maxCount));
+        }
+
+        newsCache = new ArrayList<>(merged);
+        newsCacheTime = System.currentTimeMillis();
+
+        List<StockNews> finalMerged = new ArrayList<>(merged);
         executorService.execute(() -> {
-            // 获取已有新闻
-            List<StockNews> existingNews = getAllNewsInternal();
-            
-            // 合并：新的在前
-            List<StockNews> merged = new ArrayList<>(newNewsList);
-            
-            // 添加旧新闻（去重，按标题判断）
-            java.util.Set<String> newTitles = new java.util.HashSet<>();
-            for (StockNews news : newNewsList) {
-                if (news.getTitle() != null) {
-                    newTitles.add(news.getTitle().trim());
-                }
-            }
-            for (StockNews oldNews : existingNews) {
-                if (oldNews.getTitle() != null && !newTitles.contains(oldNews.getTitle().trim())) {
-                    merged.add(oldNews);
-                }
-            }
-            
-            // 按发布时间降序排序（最新的在前）
-            merged.sort((a, b) -> Long.compare(b.getPublishTime(), a.getPublishTime()));
-            
-            // 只保留 maxCount 条
-            if (merged.size() > maxCount) {
-                merged = new ArrayList<>(merged.subList(0, maxCount));
-            }
-            
-            // 更新内存缓存
-            newsCache = new ArrayList<>(merged);
-            newsCacheTime = System.currentTimeMillis();
-            
-            String json = gson.toJson(merged);
+            String json = gson.toJson(finalMerged);
             preferences.edit().putString(KEY_NEWS, json).apply();
-            Log.d(TAG, "Merged and saved " + merged.size() + " news records (new: " + newNewsList.size() + ", existing: " + existingNews.size() + ")");
+            Log.d(TAG, "Merged and saved " + finalMerged.size() + " news records (new: " + newNewsList.size() + ", existing: " + existingNews.size() + ")");
         });
     }
 

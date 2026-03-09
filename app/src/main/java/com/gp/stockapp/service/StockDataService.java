@@ -34,7 +34,9 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +52,13 @@ public class StockDataService extends Service {
     private static final String CHANNEL_ID = "MarketDataChannel";
     private static final int NOTIFICATION_ID = 1;
     private static final long FETCH_INTERVAL = 60000; // 1分钟刷新一次
+    private static final int HISTORY_RETENTION_DAYS = 7;
+
+    public static final String ACTION_SYNC_HISTORY = "com.gp.stockapp.SYNC_HISTORY";
+    public static final String ACTION_HISTORY_SYNC_STATUS = "com.gp.stockapp.HISTORY_SYNC_STATUS";
+    public static final String EXTRA_HISTORY_SYNC_RUNNING = "history_sync_running";
+    public static final String EXTRA_HISTORY_SYNC_SUCCESS = "history_sync_success";
+    public static final String EXTRA_HISTORY_SYNC_MESSAGE = "history_sync_message";
 
     private StockRepository stockRepository;
     private MarketApi marketApi;
@@ -61,6 +70,7 @@ public class StockDataService extends Service {
     private long lastHotDataFetchTime = 0;
     private static final long HOT_DATA_FETCH_INTERVAL = 300000; // 热门数据5分钟抓取一次
     private volatile boolean isRunning = false;
+    private volatile boolean isHistorySyncRunning = false;
 
     @Override
     public void onCreate() {
@@ -88,6 +98,12 @@ public class StockDataService extends Service {
         } else {
             startForeground(NOTIFICATION_ID, createNotification("正在获取大盘数据..."));
         }
+
+        if (intent != null && ACTION_SYNC_HISTORY.equals(intent.getAction())) {
+            startHistorySync(startId);
+            return START_NOT_STICKY;
+        }
+
         startDataFetching();
         return START_STICKY;
     }
@@ -191,6 +207,77 @@ public class StockDataService extends Service {
         Log.d(TAG, "Data fetching stopped");
     }
 
+    private void startHistorySync(int startId) {
+        if (isHistorySyncRunning) {
+            broadcastHistorySyncStatus(false, false, "历史数据补齐任务已在执行中");
+            return;
+        }
+
+        isHistorySyncRunning = true;
+        broadcastHistorySyncStatus(true, true, "开始补齐最近7个交易日的龙虎榜和连板数据...");
+        scheduler.submit(() -> {
+            boolean success = false;
+            String message;
+            try {
+                message = syncRecentHistoryData();
+                success = true;
+            } catch (Exception e) {
+                Log.e(TAG, "历史数据补齐失败", e);
+                message = "历史数据补齐失败：" + e.getMessage();
+            } finally {
+                isHistorySyncRunning = false;
+            }
+
+            broadcastHistorySyncStatus(false, success, message);
+            if (!isRunning) {
+                stopSelfResult(startId);
+            }
+        });
+    }
+
+    private String syncRecentHistoryData() {
+        List<String> targetDates = TradingDayHelper.getRecentTradingDayStrings(HISTORY_RETENTION_DAYS);
+        if (targetDates.isEmpty()) {
+            return "未找到可补齐的交易日";
+        }
+
+        Set<String> dragonTigerDates = new HashSet<>(dragonTigerDao.getAllTradeDates());
+        Set<String> continuousLimitDates = new HashSet<>(continuousLimitDao.getAllTradeDates());
+        List<String> missingDates = new ArrayList<>();
+        for (String date : targetDates) {
+            if (!dragonTigerDates.contains(date) || !continuousLimitDates.contains(date)) {
+                missingDates.add(date);
+            }
+        }
+
+        int filledCount = 0;
+        for (String date : missingDates) {
+            HotStockData historicalData = hotStockApi.fetchHistoricalDatabaseData(date);
+            if (historicalData != null) {
+                saveDragonTigerToDatabase(historicalData, date);
+                saveContinuousLimitToDatabase(historicalData, date);
+                filledCount++;
+            }
+        }
+
+        pruneHistoricalDatabase();
+
+        if (missingDates.isEmpty()) {
+            return "数据库中最近7个交易日数据已齐全";
+        }
+        return "已检查最近7个交易日，补齐 " + filledCount + " 天缺失数据";
+    }
+
+    private void pruneHistoricalDatabase() {
+        List<String> recentTradingDays = TradingDayHelper.getRecentTradingDayStrings(HISTORY_RETENTION_DAYS);
+        if (recentTradingDays.isEmpty()) {
+            return;
+        }
+        String cutoffDate = recentTradingDays.get(recentTradingDays.size() - 1);
+        dragonTigerDao.deleteBeforeDate(cutoffDate);
+        continuousLimitDao.deleteBeforeDate(cutoffDate);
+    }
+
     /**
      * 抓取大盘数据
      */
@@ -198,17 +285,17 @@ public class StockDataService extends Service {
         Log.d(TAG, "==== 开始执行定时数据抓取任务 ====");
         // 直接在调度器线程中执行，无需额外的线程池
         try {
+            boolean hasDataUpdated = false;
+
             // 抓取三大指数数据
             Log.d(TAG, "正在抓取大盘指数...");
             List<MarketIndex> indices = marketApi.fetchMarketIndices();
             if (indices != null && !indices.isEmpty()) {
                 stockRepository.saveMarketIndices(indices);
+                hasDataUpdated = true;
 
                 // 更新通知
                 updateNotification(indices);
-
-                // 通知UI刷新
-                sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
 
                 Log.d(TAG, "成功更新大盘指数: " + indices.size() + " 条记录");
             } else {
@@ -234,6 +321,7 @@ public class StockDataService extends Service {
                 if (!majorNews.isEmpty()) {
                     // 合并保存（新的在前，保留最多10条）
                     stockRepository.mergeAndSaveNews(majorNews, 10);
+                    hasDataUpdated = true;
                     Log.d(TAG, "成功更新市场要闻: 筛选并保存了 " + majorNews.size() + " 条重大新闻");
                 } else {
                     Log.d(TAG, "本次无重大新闻");
@@ -293,6 +381,7 @@ public class StockDataService extends Service {
                         // 保存龙虎榜和连板股数据到数据库
                         saveDragonTigerToDatabase(hotData, dateStr);
                         saveContinuousLimitToDatabase(hotData, dateStr);
+                        pruneHistoricalDatabase();
                         Log.d(TAG, "成功更新当天热门股票数据, 龙虎榜: " + 
                                 (hotData.getDragonTigerList() != null ? hotData.getDragonTigerList().size() : 0) + " 条");
                     }
@@ -307,6 +396,7 @@ public class StockDataService extends Service {
                             // 同时保存前一日的龙虎榜和连板股到数据库
                             saveDragonTigerToDatabase(prevHotData, prevDateStr);
                             saveContinuousLimitToDatabase(prevHotData, prevDateStr);
+                            pruneHistoricalDatabase();
                             Log.d(TAG, "成功更新前一交易日热门股票数据: " + prevDateStr);
                         }
                     }
@@ -315,6 +405,10 @@ public class StockDataService extends Service {
                 } catch (Exception e) {
                     Log.e(TAG, "抓取热门股票数据失败", e);
                 }
+            }
+
+            if (hasDataUpdated) {
+                sendBroadcast(MainActivity.ACTION_DATA_UPDATED);
             }
 
             Log.d(TAG, "==== 定时数据抓取任务完成 ====");
@@ -542,6 +636,14 @@ public class StockDataService extends Service {
      */
     private void sendBroadcast(String action) {
         Intent intent = new Intent(action);
+        LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+    }
+
+    private void broadcastHistorySyncStatus(boolean running, boolean success, String message) {
+        Intent intent = new Intent(ACTION_HISTORY_SYNC_STATUS);
+        intent.putExtra(EXTRA_HISTORY_SYNC_RUNNING, running);
+        intent.putExtra(EXTRA_HISTORY_SYNC_SUCCESS, success);
+        intent.putExtra(EXTRA_HISTORY_SYNC_MESSAGE, message);
         LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
     }
 }
