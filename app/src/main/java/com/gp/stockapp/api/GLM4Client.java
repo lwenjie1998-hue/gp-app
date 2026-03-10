@@ -19,7 +19,7 @@ public class GLM4Client {
     private static final String TAG = "GLM4Client";
     private static volatile GLM4Client instance;
     
-    private static final String API_URL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions";
+    private static final String API_URL = "https://open.bigmodel.cn/api/anthropic/v1/messages";
     
     // 双模型配置
     private static final String MODEL_PREMIUM = "glm-5";     // 高精度模型：竞价推荐、尾盘推荐
@@ -116,6 +116,7 @@ public class GLM4Client {
             requestBody.put("model", model);
             requestBody.put("temperature", 0.7);
             requestBody.put("max_tokens", 20000);
+            requestBody.put("stream",false);
             requestBody.put("top_p", 0.9);
             
             // 关闭思考模式，加快响应速度
@@ -169,17 +170,32 @@ public class GLM4Client {
     private String parseResponse(String responseBody) {
         try {
             JSONObject jsonResponse = new JSONObject(responseBody);
-            org.json.JSONArray choices = jsonResponse.optJSONArray("choices");
             
+            // 兼容 OpenAI 格式 ("choices" -> [0] -> "message" -> "content")
+            org.json.JSONArray choices = jsonResponse.optJSONArray("choices");
             if (choices != null && choices.length() > 0) {
                 JSONObject firstChoice = choices.optJSONObject(0);
                 JSONObject message = firstChoice.optJSONObject("message");
-                
                 if (message != null) {
                     String content = message.optString("content");
-                    // 尝试提取JSON部分
                     return extractJsonFromContent(content);
                 }
+            }
+            
+            // 兼容 GLM 原生格式 ("content" -> [0] -> "text")
+            org.json.JSONArray contentArray = jsonResponse.optJSONArray("content");
+            if (contentArray != null && contentArray.length() > 0) {
+                JSONObject firstContent = contentArray.optJSONObject(0);
+                if (firstContent != null && "text".equals(firstContent.optString("type"))) {
+                    String text = firstContent.optString("text");
+                    return extractJsonFromContent(text);
+                }
+            }
+            
+            // 如果 response 里直接就是 content 字符串 (某些简化版或特殊模型)
+            String directContent = jsonResponse.optString("content", null);
+            if (directContent != null && !directContent.isEmpty()) {
+                return extractJsonFromContent(directContent);
             }
             
             return null;
@@ -199,13 +215,28 @@ public class GLM4Client {
             return null;
         }
         
+        // 处理 Markdown 格式的代码块
+        String cleanContent = content.trim();
+        if (cleanContent.startsWith("```")) {
+            // 找到第一个 {
+            int firstBrace = cleanContent.indexOf("{");
+            // 找到最后一个 }
+            int lastBrace = cleanContent.lastIndexOf("}");
+            if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+                cleanContent = cleanContent.substring(firstBrace, lastBrace + 1);
+            } else {
+                // 如果没有找到大括号，尝试移除 ```json 和 ``` 标记
+                cleanContent = cleanContent.replaceAll("^```(?:json)?\\s*", "").replaceAll("\\s*```$", "");
+            }
+        }
+        
         try {
             // 查找JSON的开始和结束
-            int jsonStart = content.indexOf("{");
-            int jsonEnd = content.lastIndexOf("}");
+            int jsonStart = cleanContent.indexOf("{");
+            int jsonEnd = cleanContent.lastIndexOf("}");
             
             if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                String jsonStr = content.substring(jsonStart, jsonEnd + 1);
+                String jsonStr = cleanContent.substring(jsonStart, jsonEnd + 1);
                 
                 // 验证是否是有效的JSON
                 try {
@@ -223,7 +254,7 @@ public class GLM4Client {
             
             // 没有找到闭合的}，可能整个JSON都被截断了
             if (jsonStart != -1) {
-                String truncated = content.substring(jsonStart);
+                String truncated = cleanContent.substring(jsonStart);
                 Log.w(TAG, "JSON appears truncated, attempting repair...");
                 String repaired = repairTruncatedJson(truncated);
                 if (repaired != null) {
@@ -231,11 +262,11 @@ public class GLM4Client {
                 }
             }
             
-            return content;
+            return cleanContent;
             
         } catch (Exception e) {
             Log.e(TAG, "Error extracting JSON from content", e);
-            return content;
+            return cleanContent;
         }
     }
     
