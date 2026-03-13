@@ -532,7 +532,7 @@ public class AIRecommendationService extends Service {
         try {
             String prompt = buildFullStrategyPrompt(getSectorPrompt(), indices, newsList, "sector");
 
-            String response = glm4Client.analyze(prompt);
+            String response = glm4Client.analyzePremium(prompt);
             if (response != null && !response.isEmpty()) {
                 StrategyRecommendation recommendation = parseStrategyRecommendation(response, "sector");
                 if (recommendation != null) {
